@@ -12,8 +12,14 @@ async def chat(request: ChatRequest):
     """
     Standard REST API endpoint for chat.
     NestJS backend calls this endpoint to get a complete AI response.
+    Nhận project_id và jwt_token để AI có thể truy vấn graph data theo đúng phân quyền.
     """
-    reply = await process_chat_message(request.message, request.session_id)
+    reply = await process_chat_message(
+        message=request.message,
+        session_id=request.session_id,
+        project_id=request.project_id,
+        jwt_token=request.jwt_token,
+    )
     return ChatResponse(reply=reply)
 
 
@@ -28,7 +34,10 @@ async def chat_stream(request: ChatRequest):
 
     async def event_generator():
         async for chunk in process_chat_message_stream(
-            request.message, request.session_id
+            message=request.message,
+            session_id=request.session_id,
+            project_id=request.project_id,
+            jwt_token=request.jwt_token,
         ):
             yield {"event": "message", "data": json.dumps({"chunk": chunk})}
         yield {"event": "done", "data": json.dumps({})}
