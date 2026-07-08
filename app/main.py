@@ -1,7 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import asyncio
 from app.api import router as api_router
 from app.core.config import settings
+from app.services.rabbitmq_consumer import start_consumer
 
 app = FastAPI(
     title="Memora AI Service",
@@ -20,6 +22,12 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(api_router)
+
+
+@app.on_event("startup")
+async def startup_event():
+    # Start RabbitMQ consumer as a background asyncio task
+    asyncio.create_task(start_consumer())
 
 
 @app.get("/health")

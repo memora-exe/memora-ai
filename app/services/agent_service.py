@@ -5,11 +5,14 @@ from google.adk import Agent
 from google.adk.runners import InMemoryRunner
 from google.adk.sessions import Session, InMemorySessionService
 from app.core.config import settings
+from app.services.session_manager import session_manager
 from app.services.graph_tools import (
     get_project_nodes,
     get_project_edges,
     query_project_graph,
     traverse_project_graph,
+    llm_search_by_embedding,
+    llm_hybrid_search,
 )
 
 # Đảm bảo API key được set cho Gemini model
@@ -19,8 +22,31 @@ if settings.GOOGLE_API_KEY:
 app_name = "memora"
 session_service = InMemorySessionService()
 
+# Module-level metadata tracking: key = "project_id:session_id", value = tool result
+_tool_metadata: dict = {}
 
-def _build_graph_tools(project_id: str, jwt_token: str) -> list:
+
+def _get_metadata(project_id: str, session_id: str) -> dict:
+    """Get the tracked tool metadata for a project/session."""
+    return _tool_metadata.get(f"{project_id}:{session_id}", {})
+
+
+def _clear_metadata(project_id: str, session_id: str) -> None:
+    """Clear tracked metadata for a project/session."""
+    _tool_metadata.pop(f"{project_id}:{session_id}", None)
+
+
+def _build_citation_metadata(tool_result: dict) -> dict:
+    """Build citation metadata from hybrid search tool result."""
+    return {
+        "citedNodes": tool_result.get("nodes", []),
+        "citedEdges": tool_result.get("edges", []),
+        "chunks": tool_result.get("chunks", []),
+        "reasoningPath": tool_result.get("reasoningPath", []),
+    }
+
+
+def _build_graph_tools(project_id: str, jwt_token: str, session_id: str) -> list:
     """
     Tạo danh sách tools cho Agent, đã inject sẵn project_id và jwt_token.
     LLM chỉ cần gọi tool theo nghiệp vụ, không cần biết về project_id hay jwt_token.
@@ -75,21 +101,37 @@ def _build_graph_tools(project_id: str, jwt_token: str) -> list:
         """
         return traverse_project_graph(project_id, jwt_token, start_node_id, depth)
 
-    return [llm_get_all_nodes, llm_get_all_edges, llm_query_graph, llm_traverse_graph]
+    def llm_search_vector(query: str, k: int = 5) -> list:
+        """Search document chunks using semantic similarity (pgvector) in a project.
+        Use this tool when the user asks a question that requires scanning document contents, searching for details, or doing semantic lookup.
+        """
+        return llm_search_by_embedding(project_id, query, k)
+
+    def llm_search_hybrid(query: str, k: int = 5) -> dict:
+        """Hybrid search combining semantic search on document chunks and graph nodes.
+        Use this tool when the user asks a complex question that requires both concept relationships and document contents.
+        """
+        result = llm_hybrid_search(project_id, query, jwt_token, k)
+        # Track the tool result for citation metadata
+        _tool_metadata[f"{project_id}:{session_id}"] = result
+        return result
+
+    return [llm_get_all_nodes, llm_get_all_edges, llm_query_graph, llm_traverse_graph, llm_search_vector, llm_search_hybrid]
 
 
-def _create_agent(project_id: str, jwt_token: str) -> Agent:
+def _create_agent(project_id: str, jwt_token: str, session_id: str) -> Agent:
     """Tạo một Agent mới với tools được inject context cho project."""
-    tools = _build_graph_tools(project_id, jwt_token)
+    tools = _build_graph_tools(project_id, jwt_token, session_id)
     return Agent(
         name="memora_assistant",
-        model="gemini-2.5-flash",
+        model=settings.GEMINI_MODEL,
         instruction=(
             "You are a helpful AI assistant for the Memora knowledge management system. "
             "You have access to the current project's knowledge graph. "
             "Use the provided tools to query nodes, edges, and relationships when needed to answer user questions. "
             "Always answer accurately and concisely. "
-            "If you cannot find relevant information in the graph, say so clearly."
+            "If you cannot find relevant information in the graph, say so clearly. "
+            "If you used any tool, return the answer in plain text. The system will attach citation metadata from your tool calls."
         ),
         tools=tools,
     )
@@ -109,20 +151,37 @@ async def _get_or_create_session(session_id: str) -> Session:
     )
 
 
+async def _sync_redis_history_to_session(session_id: str, session: Session):
+    """Sync short-term history from Redis to ADK session."""
+    redis_messages = session_manager.get_messages(session_id)
+    if not session.history and redis_messages:
+        for msg in redis_messages:
+            role = msg["role"]
+            content = msg["content"]
+            gemini_role = "user" if role == "user" else "model"
+            session.history.append(
+                types.Content(parts=[types.Part(text=content)], role=gemini_role)
+            )
+
+
 async def process_chat_message(
     message: str, session_id: str, project_id: str, jwt_token: str
-) -> str:
+) -> tuple[str, dict]:
     """
     Process a chat message using the ADK Agent (full response).
     Agent được tạo động với tools đã inject project_id và jwt_token.
     """
-    await _get_or_create_session(session_id)
+    session = await _get_or_create_session(session_id)
+    await _sync_redis_history_to_session(session_id, session)
 
-    agent = _create_agent(project_id, jwt_token)
+    _clear_metadata(project_id, session_id)
+    agent = _create_agent(project_id, jwt_token, session_id)
     runner = InMemoryRunner(agent=agent, app_name=app_name)
     runner.auto_create_session = True
 
     content = types.Content(parts=[types.Part(text=message)], role="user")
+
+    session_manager.append_message(session_id, "user", message)
 
     final_response = ""
     async for event in runner.run_async(
@@ -133,7 +192,14 @@ async def process_chat_message(
         if event.is_final_response() and event.content and event.content.parts:
             final_response = event.content.parts[0].text or ""
 
-    return final_response if final_response else "Sorry, I could not process your request."
+    tool_result = _get_metadata(project_id, session_id)
+    tool_calls = _build_citation_metadata(tool_result)
+    _clear_metadata(project_id, session_id)
+
+    if final_response:
+        session_manager.append_message(session_id, "assistant", final_response)
+
+    return (final_response if final_response else "Sorry, I could not process your request.", tool_calls)
 
 
 async def process_chat_message_stream(
@@ -143,20 +209,38 @@ async def process_chat_message_stream(
     Process a chat message and yield chunks for SSE (Server-Sent Events).
     Agent được tạo động với tools đã inject project_id và jwt_token.
     """
-    await _get_or_create_session(session_id)
+    session = await _get_or_create_session(session_id)
+    await _sync_redis_history_to_session(session_id, session)
 
-    agent = _create_agent(project_id, jwt_token)
+    _clear_metadata(project_id, session_id)
+    agent = _create_agent(project_id, jwt_token, session_id)
     runner = InMemoryRunner(agent=agent, app_name=app_name)
     runner.auto_create_session = True
 
     content = types.Content(parts=[types.Part(text=message)], role="user")
 
+    session_manager.append_message(session_id, "user", message)
+
+    accumulated = ""
     async for event in runner.run_async(
         user_id="default",
         session_id=session_id,
         new_message=content,
     ):
-        if event.content and event.is_final_response():
-            yield event.content
-        elif event.content:
-            yield event.content
+        if event.content:
+            parts = event.content.parts
+            if parts:
+                text_chunk = parts[0].text or ""
+                accumulated += text_chunk
+                yield text_chunk
+
+    tool_result = _get_metadata(project_id, session_id)
+    tool_calls = _build_citation_metadata(tool_result)
+    _clear_metadata(project_id, session_id)
+
+    # Yield the metadata at the end of the stream
+    yield {"metadata": tool_calls}
+
+    if accumulated:
+        session_manager.append_message(session_id, "assistant", accumulated)
+

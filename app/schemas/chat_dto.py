@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Optional, List, Any
 
 class ChatRequest(BaseModel):
     message: str
@@ -8,3 +9,4 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+    tool_calls: Optional[dict] = None  # {citedNodes, citedEdges, chunks, reasoningPath}

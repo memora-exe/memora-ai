@@ -14,13 +14,13 @@ async def chat(request: ChatRequest):
     NestJS backend calls this endpoint to get a complete AI response.
     Nhận project_id và jwt_token để AI có thể truy vấn graph data theo đúng phân quyền.
     """
-    reply = await process_chat_message(
+    reply, tool_calls = await process_chat_message(
         message=request.message,
         session_id=request.session_id,
         project_id=request.project_id,
         jwt_token=request.jwt_token,
     )
-    return ChatResponse(reply=reply)
+    return ChatResponse(reply=reply, tool_calls=tool_calls)
 
 
 @router.post("/stream")
@@ -39,7 +39,11 @@ async def chat_stream(request: ChatRequest):
             project_id=request.project_id,
             jwt_token=request.jwt_token,
         ):
-            yield {"event": "message", "data": json.dumps({"chunk": chunk})}
+            # Detect metadata dict yielded at end of stream
+            if isinstance(chunk, dict) and "metadata" in chunk:
+                yield {"event": "message", "data": json.dumps({"metadata": chunk["metadata"]})}
+            else:
+                yield {"event": "message", "data": json.dumps({"chunk": chunk})}
         yield {"event": "done", "data": json.dumps({})}
 
     return EventSourceResponse(event_generator())
