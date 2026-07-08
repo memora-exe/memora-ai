@@ -123,7 +123,7 @@ def llm_hybrid_search(project_id: str, query: str, jwt_token: str, k: int = None
 
     Steps:
     1. Retrieve top-k document chunks by embedding similarity
-    2. Retrieve all nodes, rank by embedding similarity to query
+    2. Retrieve all nodes, rank via lightweight keyword + chunk-reference heuristic
     3. Take top HYBRID_TOP_K nodes
     4. Traverse HYBRID_TRAVERSE_DEPTH hops from each top node
     5. Deduplicate and limit to HYBRID_MAX_NODES total nodes

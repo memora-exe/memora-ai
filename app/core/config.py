@@ -13,6 +13,14 @@ class Settings:
     HYBRID_TRAVERSE_DEPTH = int(os.getenv("HYBRID_TRAVERSE_DEPTH", "2"))
     HYBRID_MAX_NODES = int(os.getenv("HYBRID_MAX_NODES", "20"))
 
+    # Phase 3 — AI Search / Node Summary / Document Reader
+    SUMMARY_MODEL = os.getenv("SUMMARY_MODEL", "gemini-3.1")
+    NODE_SUMMARY_MAX_TOKENS = int(os.getenv("NODE_SUMMARY_MAX_TOKENS", "1024"))
+    DOC_SUMMARY_MAX_TOKENS = int(os.getenv("DOC_SUMMARY_MAX_TOKENS", "2048"))
+    SEARCH_TOP_K = int(os.getenv("SEARCH_TOP_K", "10"))
+    FOCAL_PADDING = float(os.getenv("FOCAL_PADDING", "1.4"))
+    DOC_SUMMARY_INPUT_CAP = int(os.getenv("DOC_SUMMARY_INPUT_CAP", "80000"))
+
     DB_HOST = os.getenv("DB_REPO_HOST", "localhost")
     DB_PORT = int(os.getenv("DB_REPO_PORT", 5433))
     DB_USER = os.getenv("DB_REPO_USERNAME", "postgres")
