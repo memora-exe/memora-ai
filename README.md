@@ -8,31 +8,53 @@ AI Microservice for Chatbot and Agents, built with **FastAPI**, **Google ADK (Ag
 - **LangChain**: Integration with LLMs, document loaders, and vector databases.
 - **sse-starlette**: Server-Sent Events (SSE) support for streaming responses.
 
-## Setup & Installation
+## Setup & Installation (PowerShell on Windows)
 
-1. Create and activate virtual environment:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
+> Dự án cung cấp sẵn `start.ps1` — **chỉ cần 1 lệnh** để chạy toàn bộ.
+
+1. Lần đầu tiên, cho phép chạy script PowerShell (một lần duy nhất):
+   ```powershell
+   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
    ```
 
-2. Install dependencies:
-   ```bash
+2. Chạy server:
+   ```powershell
+   .\start.ps1
+   ```
+
+   Script sẽ tự động: tạo `venv\` (nếu chưa có) → cài `requirements.txt` → copy `.env.example` thành `.env` (nếu chưa có) → chạy `app/main.py`.
+
+3. (Tuỳ chọn) Sửa `GOOGLE_API_KEY` trong file `.env`:
+   ```env
+   GOOGLE_API_KEY=your_google_api_key
+   ```
+
+### API sẽ chạy tại
+- Base: `http://localhost:8000`
+- Docs (Swagger UI): `http://localhost:8000/docs`
+
+### Chạy thủ công (nếu không dùng `start.ps1`)
+
+1. Tạo & kích hoạt môi trường ảo:
+   ```powershell
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1
+   ```
+
+2. Cài đặt dependencies:
+   ```powershell
    pip install -r requirements.txt
    ```
 
-3. Configure environment variables:
-   Copy `.env` and fill in your API keys:
-   ```bash
-   GOOGLE_API_KEY="your_google_api_key"
+3. Cấu hình biến môi trường (copy `.env.example` thành `.env` rồi điền key):
+   ```powershell
+   Copy-Item .env.example .env
    ```
 
-4. Run the development server:
-   ```bash
+4. Chạy server:
+   ```powershell
    python app/main.py
    ```
-   The API will be available at `http://localhost:8000`.
-   You can view the interactive API documentation (Swagger UI) at `http://localhost:8000/docs`.
 
 ## Integration Flow (SSE Streaming)
 1. **Frontend (Next.js)** sends a request to **Backend (NestJS)**.

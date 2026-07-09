@@ -4,6 +4,8 @@ from google.genai import types
 from google.adk import Agent
 from google.adk.runners import InMemoryRunner
 from google.adk.sessions import Session, InMemorySessionService
+from google.adk.events.event import Event
+from app.common.logger.logger import get_logger
 from app.core.config import settings
 from app.services.session_manager import session_manager
 from app.services.graph_tools import (
@@ -14,6 +16,8 @@ from app.services.graph_tools import (
     llm_search_by_embedding,
     llm_hybrid_search,
 )
+
+logger = get_logger("AgentService")
 
 # Đảm bảo API key được set cho Gemini model
 if settings.GOOGLE_API_KEY:
@@ -154,14 +158,24 @@ async def _get_or_create_session(session_id: str) -> Session:
 async def _sync_redis_history_to_session(session_id: str, session: Session):
     """Sync short-term history from Redis to ADK session."""
     redis_messages = session_manager.get_messages(session_id)
-    if not session.history and redis_messages:
-        for msg in redis_messages:
-            role = msg["role"]
-            content = msg["content"]
-            gemini_role = "user" if role == "user" else "model"
-            session.history.append(
-                types.Content(parts=[types.Part(text=content)], role=gemini_role)
+    if session.events or not redis_messages:
+        return
+    logger.info(f"Syncing {len(redis_messages)} history messages from Redis to session {session_id}")
+    for msg in redis_messages:
+        role = msg["role"]
+        content = msg["content"]
+        gemini_role = "user" if role == "user" else "model"
+        # Crucial fix: Must append event through session_service.append_event()
+        # to ensure it's written to storage and not lost on copies.
+        await session_service.append_event(
+            session=session,
+            event=Event(
+                content=types.Content(
+                    parts=[types.Part(text=content)], role=gemini_role
+                ),
+                author=gemini_role,
             )
+        )
 
 
 async def process_chat_message(
@@ -171,35 +185,41 @@ async def process_chat_message(
     Process a chat message using the ADK Agent (full response).
     Agent được tạo động với tools đã inject project_id và jwt_token.
     """
-    session = await _get_or_create_session(session_id)
-    await _sync_redis_history_to_session(session_id, session)
+    logger.info(f"Chat started: session_id={session_id}, project_id={project_id}, message={message[:50]}...")
+    try:
+        session = await _get_or_create_session(session_id)
+        await _sync_redis_history_to_session(session_id, session)
 
-    _clear_metadata(project_id, session_id)
-    agent = _create_agent(project_id, jwt_token, session_id)
-    runner = InMemoryRunner(agent=agent, app_name=app_name)
-    runner.auto_create_session = True
+        _clear_metadata(project_id, session_id)
+        agent = _create_agent(project_id, jwt_token, session_id)
+        runner = InMemoryRunner(agent=agent, app_name=app_name)
+        runner.auto_create_session = True
 
-    content = types.Content(parts=[types.Part(text=message)], role="user")
+        content = types.Content(parts=[types.Part(text=message)], role="user")
 
-    session_manager.append_message(session_id, "user", message)
+        session_manager.append_message(session_id, "user", message)
 
-    final_response = ""
-    async for event in runner.run_async(
-        user_id="default",
-        session_id=session_id,
-        new_message=content,
-    ):
-        if event.is_final_response() and event.content and event.content.parts:
-            final_response = event.content.parts[0].text or ""
+        final_response = ""
+        async for event in runner.run_async(
+            user_id="default",
+            session_id=session_id,
+            new_message=content,
+        ):
+            if event.is_final_response() and event.content and event.content.parts:
+                final_response = event.content.parts[0].text or ""
 
-    tool_result = _get_metadata(project_id, session_id)
-    tool_calls = _build_citation_metadata(tool_result)
-    _clear_metadata(project_id, session_id)
+        tool_result = _get_metadata(project_id, session_id)
+        tool_calls = _build_citation_metadata(tool_result)
+        _clear_metadata(project_id, session_id)
 
-    if final_response:
-        session_manager.append_message(session_id, "assistant", final_response)
+        if final_response:
+            session_manager.append_message(session_id, "assistant", final_response)
 
-    return (final_response if final_response else "Sorry, I could not process your request.", tool_calls)
+        logger.info(f"Chat finished. Response length: {len(final_response)}")
+        return (final_response if final_response else "Sorry, I could not process your request.", tool_calls)
+    except Exception as e:
+        logger.error(f"Error in chat: {str(e)}", exc_info=True)
+        raise e
 
 
 async def process_chat_message_stream(
@@ -209,38 +229,47 @@ async def process_chat_message_stream(
     Process a chat message and yield chunks for SSE (Server-Sent Events).
     Agent được tạo động với tools đã inject project_id và jwt_token.
     """
-    session = await _get_or_create_session(session_id)
-    await _sync_redis_history_to_session(session_id, session)
+    logger.info(f"Stream chat started: session_id={session_id}, project_id={project_id}, message={message[:50]}...")
+    try:
+        session = await _get_or_create_session(session_id)
+        await _sync_redis_history_to_session(session_id, session)
 
-    _clear_metadata(project_id, session_id)
-    agent = _create_agent(project_id, jwt_token, session_id)
-    runner = InMemoryRunner(agent=agent, app_name=app_name)
-    runner.auto_create_session = True
+        _clear_metadata(project_id, session_id)
+        agent = _create_agent(project_id, jwt_token, session_id)
+        runner = InMemoryRunner(agent=agent, app_name=app_name)
+        runner.auto_create_session = True
 
-    content = types.Content(parts=[types.Part(text=message)], role="user")
+        content = types.Content(parts=[types.Part(text=message)], role="user")
 
-    session_manager.append_message(session_id, "user", message)
+        session_manager.append_message(session_id, "user", message)
 
-    accumulated = ""
-    async for event in runner.run_async(
-        user_id="default",
-        session_id=session_id,
-        new_message=content,
-    ):
-        if event.content:
-            parts = event.content.parts
-            if parts:
-                text_chunk = parts[0].text or ""
-                accumulated += text_chunk
-                yield text_chunk
+        accumulated = ""
+        event_count = 0
+        async for event in runner.run_async(
+            user_id="default",
+            session_id=session_id,
+            new_message=content,
+        ):
+            event_count += 1
+            if event.content:
+                parts = event.content.parts
+                if parts:
+                    text_chunk = parts[0].text or ""
+                    accumulated += text_chunk
+                    yield text_chunk
 
-    tool_result = _get_metadata(project_id, session_id)
-    tool_calls = _build_citation_metadata(tool_result)
-    _clear_metadata(project_id, session_id)
+        logger.info(f"Stream finished. Yielded {event_count} events. Response len: {len(accumulated)}")
 
-    # Yield the metadata at the end of the stream
-    yield {"metadata": tool_calls}
+        tool_result = _get_metadata(project_id, session_id)
+        tool_calls = _build_citation_metadata(tool_result)
+        _clear_metadata(project_id, session_id)
 
-    if accumulated:
-        session_manager.append_message(session_id, "assistant", accumulated)
+        # Yield the metadata at the end of the stream
+        yield {"metadata": tool_calls}
+
+        if accumulated:
+            session_manager.append_message(session_id, "assistant", accumulated)
+    except Exception as e:
+        logger.error(f"Error in stream chat: {str(e)}", exc_info=True)
+        raise e
 

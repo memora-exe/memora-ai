@@ -1,10 +1,24 @@
 import json
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+from app.core.config import settings
+from app.prompts.loader import render_prompt
 from app.schemas.chat_dto import ChatRequest, ChatResponse
 from app.services.agent_service import process_chat_message, process_chat_message_stream
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
+
+
+class AutoTitleRequest(BaseModel):
+    message: str
+    project_id: str
+    jwt_token: str = ""
+
+
+class AutoTitleResponse(BaseModel):
+    title: str
 
 
 @router.post("/", response_model=ChatResponse)
@@ -47,3 +61,51 @@ async def chat_stream(request: ChatRequest):
         yield {"event": "done", "data": json.dumps({})}
 
     return EventSourceResponse(event_generator())
+
+
+@router.post("/auto-title", response_model=AutoTitleResponse)
+async def auto_title(request: AutoTitleRequest):
+    """
+    Generate a short chat-session title from the user's first message.
+    Called by the NestJS backend after the first user message lands.
+    """
+    msg = (request.message or "").strip()
+    if not msg:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    try:
+        prompt = render_prompt(
+            "chat_title_generator.md",
+            {"message": msg[:500]},
+        )
+    except FileNotFoundError:
+        prompt = (
+            "Generate a short title (max 6 words, same language as the user) "
+            f"for this chat: {msg[:500]}\nTitle:"
+        )
+
+    try:
+        llm = ChatGoogleGenerativeAI(
+            model=settings.SUMMARY_MODEL,
+            temperature=0.2,
+            max_output_tokens=64,
+        )
+        raw = await llm.ainvoke(prompt)
+        text = (raw.content if hasattr(raw, "content") else str(raw)).strip()
+    except Exception:
+        # Fallback: truncate the message itself as a title.
+        text = msg.splitlines()[0][:60]
+
+    # Strip quotes/backticks/leading bullet decoration
+    text = text.strip().strip('"\'`').strip()
+    # Take only the first line in case the model added explanation
+    text = text.splitlines()[0].strip()
+    # Remove common prefixes
+    for prefix in ("Title:", "Tiêu đề:", "Tiêu đề :"):
+        if text.lower().startswith(prefix.lower()):
+            text = text[len(prefix):].strip()
+
+    if len(text) > 255:
+        text = text[:255].rsplit(" ", 1)[0] or text[:255]
+
+    return AutoTitleResponse(title=text or "Hội thoại mới")
