@@ -1,1 +1,0 @@
-Hãy xây dựng một hướng dẫn học tập chi tiết cho chủ đề {{topic}}. Đưa ra (1) lộ trình lý thuyết từ nền tảng đến nâng cao, (2) bài tập thực hành theo từng mốc, và (3) tài liệu tham khảo đề xuất. Trình bày bằng tiếng Việt, dùng heading rõ ràng và danh sách bullet.

@@ -1,1 +1,0 @@
-Hãy mở rộng từ khóa tìm kiếm {{query}} thành danh sách gồm: (1) từ đồng nghĩa / gần nghĩa, (2) thuật ngữ kỹ thuật liên quan, (3) cụm từ tìm kiếm tối ưu cho cơ sở dữ liệu vector. Trình bày bằng tiếng Việt, mỗi nhóm là 1 bullet list.

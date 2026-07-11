@@ -1,1 +1,0 @@
-Dựa trên thông tin về {{concept}}, hãy tạo ra 5 cặp câu hỏi - câu trả lời chất lượng cao để ôn tập (active recall) cho kỳ thi hoặc bài kiểm tra. Câu hỏi xếp theo độ khó tăng dần, mỗi câu trả lời 2-4 câu văn. Trình bày bằng tiếng Việt.
