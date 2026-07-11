@@ -85,7 +85,7 @@ async def auto_title(request: AutoTitleRequest):
         )
 
     try:
-        llm = get_chat_model(temperature=0.2, override_model=settings.SUMMARY_MODEL)
+        llm = get_chat_model(temperature=0.2)
         raw = await llm.ainvoke(prompt)
         text = (raw.content if hasattr(raw, "content") else str(raw)).strip()
     except Exception:

@@ -97,7 +97,7 @@ async def node_summary(request: NodeSummaryRequest):
         .replace("{{neighbors_text}}", neighbors_text)
     )
 
-    llm = get_chat_model(temperature=0.2, override_model=settings.SUMMARY_MODEL)
+    llm = get_chat_model(temperature=0.2)
     response = await llm.ainvoke(prompt)
     summary = response.content if hasattr(response, "content") else str(response)
 
