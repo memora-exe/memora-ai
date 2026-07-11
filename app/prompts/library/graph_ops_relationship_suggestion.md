@@ -1,0 +1,1 @@
+Dựa trên danh sách các khái niệm sau: {{nodes_list}}, hãy gợi ý những mối quan hệ logic (kèm giải thích ngắn gọn) nên được thiết lập giữa chúng. Mỗi gợi ý gồm: node nguồn, node đích, loại quan hệ (ví dụ: prerequisite_of, related_to, part_of, contrasts_with), và 1 câu giải thích. Trả về danh sách các gợi ý, không cần JSON. Viết bằng tiếng Việt.

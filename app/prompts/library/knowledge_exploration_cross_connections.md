@@ -1,0 +1,1 @@
+Hãy phân tích mối quan hệ giữa hai khái niệm {{concept_a}} và {{concept_b}}. Chúng liên kết với nhau như thế nào, có những điểm giao thoa nào, và điểm khác biệt cốt lõi nào cần làm rõ. Trả lời bằng tiếng Việt, có cấu trúc: điểm chung, điểm khác, khi nào dùng cái này thay cái kia.

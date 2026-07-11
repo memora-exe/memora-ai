@@ -1,0 +1,1 @@
+Hãy tìm một phép ẩn dụ hoặc so sánh thực tế đời thường để giải thích khái niệm phức tạp {{concept}} giúp một người mới bắt đầu dễ dàng hình dung. Trình bày 1 ẩn dụ chính, giải thích vì sao ẩn dụ phù hợp, và nêu giới hạn của ẩn dụ đó. Viết bằng tiếng Việt.
