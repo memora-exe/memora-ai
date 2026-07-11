@@ -1,13 +1,17 @@
 import time
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from app.core.config import settings
+from app.core.config import settings, validate_embedding_dim
+from app.services.llm import get_embedding_model
+
+# Sanity-check embedding dim vs pgvector column at import time.
+validate_embedding_dim()
+
 
 class EmbeddingService:
     def __init__(self):
-        self.embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001",
-            google_api_key=settings.GOOGLE_API_KEY
-        )
+        # OpenAI-API-spec dispatcher (refactored 2026-07-09).
+        # Default returns OpenAIEmbeddings(OPENAI_EMBED_MODEL) — same wire format
+        # regardless of which provider sits behind OPENAI_EMBED_BASE_URL.
+        self.embeddings = get_embedding_model()
 
     def get_embedding(self, text: str) -> list[float]:
         return self.get_embeddings([text])[0]

@@ -4,17 +4,18 @@ POST /api/node-insights/summary
 Body: { node_id, project_id, jwt_token, level: beginner|intermediate|advanced }
 Returns: { summary }
 
-Reuses traverse_project_graph from graph_tools + ChatGoogleGenerativeAI.
+Reuses traverse_project_graph from graph_tools + provider-agnostic
+`get_chat_model()` (OpenAI API spec).
 """
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException
-from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 
 from app.core.config import settings
 from app.prompts.loader import load_prompt
 from app.services.graph_tools import traverse_project_graph
+from app.services.llm import get_chat_model
 
 router = APIRouter(prefix="/api/node-insights", tags=["AI Node Insights"])
 
@@ -96,11 +97,7 @@ async def node_summary(request: NodeSummaryRequest):
         .replace("{{neighbors_text}}", neighbors_text)
     )
 
-    llm = ChatGoogleGenerativeAI(
-        model=settings.SUMMARY_MODEL,
-        temperature=0.2,
-        max_output_tokens=settings.NODE_SUMMARY_MAX_TOKENS,
-    )
+    llm = get_chat_model(temperature=0.2, override_model=settings.SUMMARY_MODEL)
     response = await llm.ainvoke(prompt)
     summary = response.content if hasattr(response, "content") else str(response)
 

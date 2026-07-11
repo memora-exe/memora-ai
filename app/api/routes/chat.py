@@ -1,12 +1,12 @@
 import json
 from fastapi import APIRouter, HTTPException
-from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 from app.core.config import settings
 from app.prompts.loader import render_prompt
 from app.schemas.chat_dto import ChatRequest, ChatResponse
 from app.services.agent_service import process_chat_message, process_chat_message_stream
+from app.services.llm import get_chat_model
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
@@ -85,11 +85,7 @@ async def auto_title(request: AutoTitleRequest):
         )
 
     try:
-        llm = ChatGoogleGenerativeAI(
-            model=settings.SUMMARY_MODEL,
-            temperature=0.2,
-            max_output_tokens=64,
-        )
+        llm = get_chat_model(temperature=0.2, override_model=settings.SUMMARY_MODEL)
         raw = await llm.ainvoke(prompt)
         text = (raw.content if hasattr(raw, "content") else str(raw)).strip()
     except Exception:

@@ -1,15 +1,12 @@
 import json
 import re
-from langchain_google_genai import ChatGoogleGenerativeAI
-from app.core.config import settings
+from app.core.config import settings, _RESOLVED_CHAT_KEY
+from app.services.llm import get_chat_model
+
 
 def extract_concepts(text: str) -> dict:
-    # Initialize LLM
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        temperature=0,
-        google_api_key=settings.GOOGLE_API_KEY
-    )
+    # Provider-agnostic dispatcher (refactored 2026-07-09). Default: Gemini 2.5 Flash.
+    llm = get_chat_model(temperature=0)
 
     prompt = (
         "Extract key concepts (nodes) and their relationships (edges) from the following text.\n"

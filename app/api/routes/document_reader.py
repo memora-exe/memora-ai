@@ -7,12 +7,12 @@ Returns: { summary }
 from typing import List
 
 from fastapi import APIRouter, HTTPException
-from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 
 from app.core.config import settings
 from app.prompts.loader import load_prompt
 from app.services.vector_store import get_db_connection
+from app.services.llm import get_chat_model
 
 router = APIRouter(prefix="/api/document-reader", tags=["AI Document Reader"])
 
@@ -75,11 +75,7 @@ async def document_summary(request: DocSummaryRequest):
     template = load_prompt(PROMPT_FILE[request.type])
     prompt = template.replace("{{document_text}}", text)
 
-    llm = ChatGoogleGenerativeAI(
-        model=settings.SUMMARY_MODEL,
-        temperature=0.1,
-        max_output_tokens=settings.DOC_SUMMARY_MAX_TOKENS,
-    )
+    llm = get_chat_model(temperature=0.1, override_model=settings.SUMMARY_MODEL)
     response = await llm.ainvoke(prompt)
     summary = response.content if hasattr(response, "content") else str(response)
 
