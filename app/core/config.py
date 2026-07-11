@@ -3,10 +3,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
 class Settings:
     PORT = int(os.getenv("PORT", 8000))
     NESTJS_API_URL = os.getenv("NESTJS_API_URL", "http://localhost:3000")
+
+    # Legacy Google AI key — still consumed by agent_service.py which uses
+    # google-genai / google-adk (those SDKs read GOOGLE_API_KEY from os.environ).
+    # Not used by the OpenAI-spec dispatcher below.
+    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or None
 
     # --- LLM dispatcher (OpenAI API spec, refactored 2026-07-09) ------------
     # All providers (OpenAI, OpenRouter, Azure, Gemini-OpenAI-compat proxy,
@@ -30,11 +34,6 @@ class Settings:
     EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
     PGVECTOR_COLUMN_DIM = int(os.getenv("PGVECTOR_COLUMN_DIM", "1536"))
 
-    # Back-compat: Phase 1/2/3 code may still read SUMMARY_MODEL.
-    SUMMARY_MODEL = os.getenv("SUMMARY_MODEL") or OPENAI_MODEL
-    # Legacy alias kept for any stragglers reading GEMINI_MODEL.
-    GEMINI_MODEL = os.getenv("GEMINI_MODEL") or OPENAI_MODEL
-
     HYBRID_TOP_K = int(os.getenv("HYBRID_TOP_K", "5"))
     HYBRID_TRAVERSE_DEPTH = int(os.getenv("HYBRID_TRAVERSE_DEPTH", "2"))
     HYBRID_MAX_NODES = int(os.getenv("HYBRID_MAX_NODES", "20"))
@@ -46,20 +45,13 @@ class Settings:
     FOCAL_PADDING = float(os.getenv("FOCAL_PADDING", "1.4"))
     DOC_SUMMARY_INPUT_CAP = int(os.getenv("DOC_SUMMARY_INPUT_CAP", "80000"))
 
-    # Phase 4 — Learning Navigator (Roadmaps)
-    ROADMAP_MODEL = os.getenv("ROADMAP_MODEL") or OPENAI_MODEL
-    ROADMAP_TOPIC_EXTRACTION_MODEL = (
-        os.getenv("ROADMAP_TOPIC_EXTRACTION_MODEL") or OPENAI_MODEL
-    )
+    # Phase 4 — Learning Navigator (Roadmaps) — all use OPENAI_MODEL
     ROADMAP_TOP_K_SEEDS = int(os.getenv("ROADMAP_TOP_K_SEEDS", "10"))
     ROADMAP_MAX_STAGES = int(os.getenv("ROADMAP_MAX_STAGES", "4"))
     ROADMAP_DOC_TEXT_CHAR_BUDGET = int(os.getenv("ROADMAP_DOC_TEXT_CHAR_BUDGET", "80000"))
     ROADMAP_MAX_FILE_IDS = int(os.getenv("ROADMAP_MAX_FILE_IDS", "5"))
 
-    # Phase 4 — Knowledge Insights Dashboard
-    INSIGHTS_RECOMMENDATIONS_MODEL = (
-        os.getenv("INSIGHTS_RECOMMENDATIONS_MODEL") or OPENAI_MODEL
-    )
+    # Phase 4 — Knowledge Insights Dashboard — all use OPENAI_MODEL
     INSIGHTS_DEGREE_GAP_THRESHOLD = int(os.getenv("INSIGHTS_DEGREE_GAP_THRESHOLD", "2"))
 
     DB_HOST = os.getenv("DB_REPO_HOST", "localhost")
@@ -73,9 +65,7 @@ class Settings:
     REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT = int(os.getenv("REDIS_PORT", 6380))
 
-
 settings = Settings()
-
 
 def validate_embedding_dim() -> None:
     """Fail fast at boot if EMBEDDING_DIM disagrees with the pgvector column."""

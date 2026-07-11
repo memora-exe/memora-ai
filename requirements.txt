@@ -18,3 +18,4 @@ numpy>=1.26.0,<3.0.0
 pgvector>=0.3.0
 langchain-google-genai>=2.0.0
 langchain-postgres>=0.0.13
+langchain-openai>=0.2.0
