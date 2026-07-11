@@ -222,7 +222,7 @@ async def _synthesize_recommendations(
         },
     )
     try:
-        model = get_chat_model(temperature=0.3, override_model=settings.INSIGHTS_RECOMMENDATIONS_MODEL)
+        model = get_chat_model(temperature=0.3)
         result = await model.ainvoke(template)
         return (result.content if hasattr(result, "content") else str(result)).strip()
     except Exception as e:  # ponystail: insights shouldn't block UI; degrade silently

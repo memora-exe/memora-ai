@@ -128,7 +128,7 @@ def _create_agent(project_id: str, jwt_token: str, session_id: str) -> Agent:
     tools = _build_graph_tools(project_id, jwt_token, session_id)
     return Agent(
         name="memora_assistant",
-        model=settings.GEMINI_MODEL,
+        model=settings.OPENAI_MODEL,
         instruction=(
             "You are a helpful AI assistant for the Memora knowledge management system. "
             "You have access to the current project's knowledge graph. "

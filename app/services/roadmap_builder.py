@@ -143,7 +143,7 @@ async def _describe_stage(topic: str, stage_index: int, total_stages: int, conce
         },
     )
     try:
-        llm = get_chat_model(temperature=0.3, override_model=settings.ROADMAP_MODEL)
+        llm = get_chat_model(temperature=0.3)
         raw = await llm.ainvoke(prompt)
         text = (raw.content if hasattr(raw, "content") else str(raw)).strip()
     except Exception as e:

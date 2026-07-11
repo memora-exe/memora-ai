@@ -80,7 +80,7 @@ async def extract_topic_from_files(file_ids: List[str]) -> dict:
     )
 
     try:
-        llm = get_chat_model(temperature=0.1, override_model=settings.ROADMAP_TOPIC_EXTRACTION_MODEL)
+        llm = get_chat_model(temperature=0.1)
         raw = await llm.ainvoke(prompt)
         text = (raw.content if hasattr(raw, "content") else str(raw)).strip()
     except Exception as e:

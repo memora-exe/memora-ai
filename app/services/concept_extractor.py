@@ -1,6 +1,6 @@
 import json
 import re
-from app.core.config import settings, _RESOLVED_CHAT_KEY
+from app.core.config import settings
 from app.services.llm import get_chat_model
 
 
