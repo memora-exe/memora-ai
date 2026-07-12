@@ -1,11 +1,11 @@
 import asyncio
+import json
 import os
 from google.genai import types
 from google.adk import Agent
 from google.adk.models.lite_llm import LiteLlm
 from google.adk.runners import InMemoryRunner
 from google.adk.sessions import Session, InMemorySessionService
-from google.adk.events.event import Event
 from app.common.logger.logger import get_logger
 from app.core.config import settings
 from app.services.session_manager import session_manager
@@ -19,9 +19,29 @@ from app.services.graph_tools import (
     create_project_node,
     update_project_node,
     delete_project_node,
+    create_project_edge,
+    update_project_edge,
+    delete_project_edge,
+    list_project_node_types,
+    list_project_files,
+    read_file_content,
 )
+from app.prompts.loader import render_prompt
 
 logger = get_logger("AgentService")
+
+INSTRUCTION = "chat_agent.md"
+
+
+def _build_instruction(history_messages: list) -> str:
+    """Load chat_agent.md template and inject last 20 history turns."""
+    history_block = ""
+    if history_messages:
+        history_block = "\n## Prior conversation\n" + "\n".join(
+            f"- {m['role']}: {m['content']}" for m in history_messages[-20:]
+        )
+    return render_prompt(INSTRUCTION, {"history_block": history_block})
+
 
 # Đảm bảo API key được set cho Gemini model
 if settings.GOOGLE_API_KEY:
@@ -32,6 +52,7 @@ session_service = InMemorySessionService()
 
 # Module-level metadata tracking: key = "project_id:session_id", value = tool result
 _tool_metadata: dict = {}
+_MUT_KEY = "mutatedEntities"
 
 
 def _get_metadata(project_id: str, session_id: str) -> dict:
@@ -47,10 +68,15 @@ def _clear_metadata(project_id: str, session_id: str) -> None:
 def _build_citation_metadata(tool_result: dict) -> dict:
     """Build citation metadata from hybrid search tool result."""
     return {
-        "citedNodes": tool_result.get("nodes", []),
-        "citedEdges": tool_result.get("edges", []),
-        "chunks": tool_result.get("chunks", []),
-        "reasoningPath": tool_result.get("reasoningPath", []),
+        "citedNodes":      tool_result.get("nodes", []),
+        "citedEdges":      tool_result.get("edges", []),
+        "chunks":          tool_result.get("chunks", []),
+        "reasoningPath":   tool_result.get("reasoningPath", []),
+        "mutatedEntities": tool_result.get(_MUT_KEY, {
+            "created": {"nodes": [], "edges": []},
+            "updated": {"nodes": [], "edges": []},
+            "deleted": {"nodes": [], "edges": []},
+        }),
     }
 
 
@@ -59,6 +85,24 @@ def _build_graph_tools(project_id: str, jwt_token: str, session_id: str) -> list
     Tạo danh sách tools cho Agent, đã inject sẵn project_id và jwt_token.
     LLM chỉ cần gọi tool theo nghiệp vụ, không cần biết về project_id hay jwt_token.
     """
+
+    def _record_mutation(action: str, *, nodes=(), edges=()) -> None:
+        """Append entity ids to the per-session mutation tracker.
+
+        project_id, session_id and _tool_metadata are captured from the enclosing
+        scope of _build_graph_tools (per-turn closure).
+        """
+        bucket = _tool_metadata.setdefault(
+            f"{project_id}:{session_id}", {}
+        ).setdefault(_MUT_KEY, {
+            "created": {"nodes": [], "edges": []},
+            "updated": {"nodes": [], "edges": []},
+            "deleted": {"nodes": [], "edges": []},
+        })
+        if nodes:
+            bucket[action]["nodes"].extend(n for n in nodes if n)
+        if edges:
+            bucket[action]["edges"].extend(e for e in edges if e)
 
     def llm_get_all_nodes() -> dict:
         """Retrieve all knowledge graph nodes in the current project.
@@ -124,43 +168,81 @@ def _build_graph_tools(project_id: str, jwt_token: str, session_id: str) -> list
         _tool_metadata[f"{project_id}:{session_id}"] = result
         return result
 
-    def llm_create_node(node_name: str, node_type_id: str = None, node_id: str = None) -> dict:
-        """Create a new knowledge graph node in the current project.
-        Use this tool when the user asks to add a new concept, entity, person, or topic to the project.
+    def llm_create_node(
+        node_name: str,
+        node_type_id: str = None,
+        node_id: str = None,
+        note: str = None,
+        data: dict = None,
+    ) -> dict:
+        """Create a new knowledge graph node in current project.
+
+        Use when the user asks to capture a new concept, entity, person, or topic
+        in the project. Populate `note` with the substantive text (an excerpt,
+        summary, or analysis) and `data` with structured metadata such as
+        {"source": fileId} when the node was derived from a file.
 
         Args:
-            node_name (str): The display name for the new node.
-            node_type_id (str, optional): The ID of an existing node type to assign.
-            node_id (str, optional): Client-provided UUID for the node. If omitted, server assigns one.
+            node_name: display name for the new node (REQUIRED).
+            node_type_id: existing node type id (UUID) to assign — omitted = no type.
+            node_id: optional client-provided UUID; server assigns one when omitted.
+            note: substantive text content for the node's note field (REQUIRED
+                when the user shared a file or asked for the node to contain
+                information; never leave empty in those cases).
+            data: optional structured payload (e.g. {"source": "<fileId>"}).
 
-        Returns:
-            dict: The created node with its server-assigned ID and properties.
+        Returns: created node with server-assigned id and properties.
         """
         payload = {"nodeName": node_name}
         if node_type_id:
             payload["nodeTypeId"] = node_type_id
         if node_id:
             payload["nodeId"] = node_id
-        return create_project_node(project_id, jwt_token, payload)
+        if note:
+            payload["note"] = note
+        if data:
+            payload["data"] = data
+        result = create_project_node(project_id, jwt_token, payload)
+        nid = None
+        if isinstance(result, dict) and not result.get("error"):
+            nid = result.get("nodeId") or result.get("id")
+        if nid:
+            _record_mutation("created", nodes=[nid])
+        return result
 
-    def llm_update_node(node_id: str, node_name: str = None, node_type_id: str = None) -> dict:
-        """Update an existing knowledge graph node in the current project.
-        Use this when the user asks to rename a node or change its type.
+    def llm_update_node(
+        node_id: str,
+        node_name: str = None,
+        node_type_id: str = None,
+        note: str = None,
+        data: dict = None,
+    ) -> dict:
+        """Update an existing knowledge graph node in current project.
 
-        Args:
-            node_id (str): The ID of the node to update.
-            node_name (str, optional): New display name. Omit to keep current.
-            node_type_id (str, optional): New node type ID. Omit to keep current.
-
-        Returns:
-            dict: The updated node.
+        Omit any field to keep its current value. Pass `note` to overwrite the
+        text content; pass `data` to overwrite the structured payload.
         """
         payload = {"nodeId": node_id}
         if node_name is not None:
             payload["nodeName"] = node_name
         if node_type_id is not None:
             payload["nodeTypeId"] = node_type_id
-        return update_project_node(project_id, jwt_token, payload)
+        if note is not None:
+            payload["note"] = note
+        if data is not None:
+            payload["data"] = data
+        result = update_project_node(project_id, jwt_token, payload)
+        if isinstance(result, dict) and not result.get("error"):
+            _record_mutation("updated", nodes=[node_id])
+        return result
+
+    def llm_update_node_note(node_id: str, note: str) -> dict:
+        """Convenience wrapper to set only the `note` field of an existing node.
+
+        Use when the user asks to attach text to an existing concept (e.g. "ghi
+        chú cho node X là: ...").
+        """
+        return llm_update_node(node_id=node_id, note=note)
 
     def llm_delete_node(node_id: str) -> dict:
         """Delete a knowledge graph node from the current project.
@@ -173,7 +255,100 @@ def _build_graph_tools(project_id: str, jwt_token: str, session_id: str) -> list
         Returns:
             dict: Confirmation with the deleted node's ID on success, or error details.
         """
-        return delete_project_node(project_id, jwt_token, node_id)
+        result = delete_project_node(project_id, jwt_token, node_id)
+        if isinstance(result, dict) and not result.get("error"):
+            _record_mutation("deleted", nodes=[node_id])
+        return result
+
+    def llm_list_files() -> dict:
+        """List all files uploaded to the current project.
+        Use this whenever the user mentions 'the file', 'document', 'report', 'PDF',
+        or refers to a file without giving its name. Returns a dict with a list of
+        {id, originalName, mimetype, size, ...} entries.
+        """
+        return list_project_files(project_id, jwt_token)
+
+    def llm_read_file(file_id: str) -> dict:
+        """Read parsed text content of a single uploaded file by its id.
+        Use after llm_list_files to retrieve a specific file's content.
+        """
+        return read_file_content(project_id, file_id, jwt_token)
+
+    def llm_create_edge(
+        source_node_id: str,
+        target_node_id: str,
+        edge_type_id: str = None,
+        properties: dict = None,
+        edge_id: str = None,
+    ) -> dict:
+        """Create a relationship between two existing nodes in the project.
+
+        Use when the user describes a relation between two concepts they already
+        know (or that you just created). Source and target must be nodeIds of
+        nodes that already exist in this project; use llm_search_hybrid first if
+        you are unsure.
+
+        Args:
+            source_node_id: id of the source node (REQUIRED).
+            target_node_id: id of the target node (REQUIRED).
+            edge_type_id: optional edge type id (UUID) — use llm_list_node_types
+                only after we also add list_edge_types; for now omit unless told.
+            properties: optional structured payload (free dict of metadata).
+            edge_id: optional client-provided UUID; server assigns one if omitted.
+        """
+        payload = {"sourceNodeId": source_node_id, "targetNodeId": target_node_id}
+        if edge_type_id:
+            payload["edgeTypeId"] = edge_type_id
+        if properties:
+            payload["properties"] = properties
+        if edge_id:
+            payload["edgeId"] = edge_id
+        result = create_project_edge(project_id, jwt_token, payload)
+        eid = None
+        if isinstance(result, dict) and not result.get("error"):
+            eid = result.get("edgeId") or result.get("id")
+        if eid:
+            _record_mutation("created", edges=[eid])
+        return result
+
+    def llm_update_edge(
+        edge_id: str,
+        source_node_id: str = None,
+        target_node_id: str = None,
+        edge_type_id: str = None,
+        properties: dict = None,
+    ) -> dict:
+        """Update an existing edge. Omit any field to keep its current value."""
+        payload = {"edgeId": edge_id}
+        if source_node_id is not None:
+            payload["sourceNodeId"] = source_node_id
+        if target_node_id is not None:
+            payload["targetNodeId"] = target_node_id
+        if edge_type_id is not None:
+            payload["edgeTypeId"] = edge_type_id
+        if properties is not None:
+            payload["properties"] = properties
+        result = update_project_edge(project_id, jwt_token, payload)
+        if isinstance(result, dict) and not result.get("error"):
+            _record_mutation("updated", edges=[edge_id])
+        return result
+
+    def llm_delete_edge(edge_id: str) -> dict:
+        """Delete an edge by id."""
+        result = delete_project_edge(project_id, jwt_token, edge_id)
+        if isinstance(result, dict) and not result.get("error"):
+            _record_mutation("deleted", edges=[edge_id])
+        return result
+
+    def llm_list_node_types() -> dict:
+        """List all node types defined in the current project.
+
+        Use when you need a nodeTypeId for llm_create_node / llm_update_node.
+        Returns the array of node type entries: each has nodeTypeId, typeName,
+        and optional schema. Pick the most specific existing type; do NOT invent
+        a new id — if no type fits, omit nodeTypeId.
+        """
+        return list_project_node_types(project_id, jwt_token)
 
     return [
         llm_get_all_nodes,
@@ -184,12 +359,29 @@ def _build_graph_tools(project_id: str, jwt_token: str, session_id: str) -> list
         llm_search_hybrid,
         llm_create_node,
         llm_update_node,
+        llm_update_node_note,
         llm_delete_node,
+        llm_create_edge,
+        llm_update_edge,
+        llm_delete_edge,
+        llm_list_node_types,
+        llm_list_files,
+        llm_read_file,
     ]
 
 
-def _create_agent(project_id: str, jwt_token: str, session_id: str) -> Agent:
-    """Tạo một Agent mới với tools được inject context cho project."""
+def _create_agent(
+    project_id: str,
+    jwt_token: str,
+    session_id: str,
+    history_messages: list,
+) -> Agent:
+    """Tạo một Agent mới với tools được inject context cho project.
+
+    history_messages: list of {role, content} dicts loaded from Redis by the caller.
+    The chat_agent.md template (P1) defines node-vs-file vocabulary; history is
+    appended by _build_instruction.
+    """
     tools = _build_graph_tools(project_id, jwt_token, session_id)
     return Agent(
         name="memora_assistant",
@@ -198,19 +390,7 @@ def _create_agent(project_id: str, jwt_token: str, session_id: str) -> Agent:
             api_base=settings.OPENAI_BASE_URL,
             api_key=settings.OPENAI_API_KEY,
         ),
-        instruction=(
-            "You are a helpful AI assistant for the Memora knowledge management system. "
-            "You have tools to query the project's knowledge graph AND search the full text of "
-            "uploaded documents (via semantic + hybrid search).\n\n"
-            "Decision rules:\n"
-            "- If the user asks about content, a quote, or detail from a file/document/report/paper, "
-            "or anything that may live in an uploaded file → ALWAYS call llm_search_hybrid first "
-            "(combines graph + document chunks).\n"
-            "- For pure graph questions (concepts, relations) use llm_query_graph or llm_traverse_graph.\n"
-            "- Cite the source by referencing the chunk text you retrieved.\n"
-            "- If no tool returns useful info, say so — do not invent.\n"
-            "Return the answer in plain text; the system will attach citation metadata."
-        ),
+        instruction=_build_instruction(history_messages),
         tools=tools,
     )
 
@@ -229,27 +409,21 @@ async def _get_or_create_session(session_id: str) -> Session:
     )
 
 
-async def _sync_redis_history_to_session(session_id: str, session: Session):
-    """Sync short-term history from Redis to ADK session."""
-    redis_messages = session_manager.get_messages(session_id)
-    if session.events or not redis_messages:
-        return
-    logger.info(f"Syncing {len(redis_messages)} history messages from Redis to session {session_id}")
-    for msg in redis_messages:
-        role = msg["role"]
-        content = msg["content"]
-        gemini_role = "user" if role == "user" else "model"
-        # Crucial fix: Must append event through session_service.append_event()
-        # to ensure it's written to storage and not lost on copies.
-        await session_service.append_event(
-            session=session,
-            event=Event(
-                content=types.Content(
-                    parts=[types.Part(text=content)], role=gemini_role
-                ),
-                author=gemini_role,
-            )
-        )
+async def _aiter_with_timeout(async_iter, timeout: float):
+    """Wrap any async iterator with a per-step timeout. Raises asyncio.TimeoutError
+    if a single __anext__() exceeds `timeout` seconds. Use this instead of
+    `asyncio.wait_for(iter, timeout=...)` because the latter wraps the coroutine
+    returned by the call, not the per-step await — and `async for` rejects a
+    plain coroutine with TypeError.
+    ponytail: replace with a context-manager timeout if we need an overall
+    deadline (currently we only need idle-timeout protection).
+    """
+    iterator = async_iter.__aiter__()
+    while True:
+        try:
+            yield await asyncio.wait_for(iterator.__anext__(), timeout=timeout)
+        except StopAsyncIteration:
+            return
 
 
 async def process_chat_message(
@@ -262,10 +436,10 @@ async def process_chat_message(
     logger.info(f"Chat started: session_id={session_id}, project_id={project_id}, message={message[:50]}...")
     try:
         session = await _get_or_create_session(session_id)
-        await _sync_redis_history_to_session(session_id, session)
 
         _clear_metadata(project_id, session_id)
-        agent = _create_agent(project_id, jwt_token, session_id)
+        history_messages = session_manager.get_messages(session_id) or []
+        agent = _create_agent(project_id, jwt_token, session_id, history_messages)
         runner = InMemoryRunner(agent=agent, app_name=app_name)
         runner.auto_create_session = True
 
@@ -274,13 +448,23 @@ async def process_chat_message(
         session_manager.append_message(session_id, "user", message)
 
         final_response = ""
-        async for event in runner.run_async(
-            user_id="default",
-            session_id=session_id,
-            new_message=content,
-        ):
-            if event.is_final_response() and event.content and event.content.parts:
-                final_response = event.content.parts[0].text or ""
+        try:
+            async for event in _aiter_with_timeout(
+                runner.run_async(
+                    user_id="default",
+                    session_id=session_id,
+                    new_message=content,
+                ),
+                timeout=settings.CHAT_LLM_TIMEOUT_SEC,
+            ):
+                if event.is_final_response() and event.content and event.content.parts:
+                    final_response = event.content.parts[0].text or ""
+        except asyncio.TimeoutError:
+            logger.error(f"Runner run_async timed out after {settings.CHAT_LLM_TIMEOUT_SEC}s (session_id={session_id})")
+            final_response = (
+                f"Sorry, the AI took too long to respond "
+                f"(timeout after {settings.CHAT_LLM_TIMEOUT_SEC}s). Please try again."
+            )
 
         tool_result = _get_metadata(project_id, session_id)
         tool_calls = _build_citation_metadata(tool_result)
@@ -306,10 +490,10 @@ async def process_chat_message_stream(
     logger.info(f"Stream chat started: session_id={session_id}, project_id={project_id}, message={message[:50]}...")
     try:
         session = await _get_or_create_session(session_id)
-        await _sync_redis_history_to_session(session_id, session)
 
         _clear_metadata(project_id, session_id)
-        agent = _create_agent(project_id, jwt_token, session_id)
+        history_messages = session_manager.get_messages(session_id) or []
+        agent = _create_agent(project_id, jwt_token, session_id, history_messages)
         runner = InMemoryRunner(agent=agent, app_name=app_name)
         runner.auto_create_session = True
 
@@ -319,18 +503,26 @@ async def process_chat_message_stream(
 
         accumulated = ""
         event_count = 0
-        async for event in runner.run_async(
-            user_id="default",
-            session_id=session_id,
-            new_message=content,
-        ):
-            event_count += 1
-            if event.content:
-                parts = event.content.parts
-                if parts:
-                    text_chunk = parts[0].text or ""
-                    accumulated += text_chunk
-                    yield text_chunk
+        try:
+            async for event in _aiter_with_timeout(
+                runner.run_async(
+                    user_id="default",
+                    session_id=session_id,
+                    new_message=content,
+                ),
+                timeout=settings.CHAT_LLM_TIMEOUT_SEC,
+            ):
+                event_count += 1
+                if event.content:
+                    parts = event.content.parts
+                    if parts:
+                        text_chunk = parts[0].text or ""
+                        accumulated += text_chunk
+                        yield text_chunk
+        except asyncio.TimeoutError:
+            logger.error(f"Runner run_async timed out after {settings.CHAT_LLM_TIMEOUT_SEC}s (session_id={session_id})")
+            yield json.dumps({"error": f"LLM timed out after {settings.CHAT_LLM_TIMEOUT_SEC}s"})
+            return
 
         logger.info(f"Stream finished. Yielded {event_count} events. Response len: {len(accumulated)}")
 

@@ -81,8 +81,90 @@ def delete_project_node(project_id: str, jwt_token: str, node_id: str) -> dict:
         return {"error": f"Exception deleting node: {str(e)}"}
 
 
+def create_project_edge(project_id: str, jwt_token: str, payload: dict) -> dict:
+    """POST /projects/:pid/graph/edges — create edge."""
+    headers = {"Authorization": f"Bearer {jwt_token}"}
+    url = f"{NESTJS_API_URL}/projects/{project_id}/graph/edges"
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        if response.status_code in (200, 201):
+            return response.json()
+        return {"error": f"Failed to create edge. Status: {response.status_code}", "detail": response.text}
+    except Exception as e:
+        return {"error": f"Exception creating edge: {str(e)}"}
+
+
+def update_project_edge(project_id: str, jwt_token: str, payload: dict) -> dict:
+    """PATCH /projects/:pid/graph/edges — update edge."""
+    headers = {"Authorization": f"Bearer {jwt_token}"}
+    url = f"{NESTJS_API_URL}/projects/{project_id}/graph/edges"
+    try:
+        response = requests.patch(url, headers=headers, json=payload)
+        if response.status_code in (200, 201):
+            return response.json()
+        return {"error": f"Failed to update edge. Status: {response.status_code}", "detail": response.text}
+    except Exception as e:
+        return {"error": f"Exception updating edge: {str(e)}"}
+
+
+def delete_project_edge(project_id: str, jwt_token: str, edge_id: str) -> dict:
+    """DELETE /projects/:pid/graph/edges/:edgeId."""
+    headers = {"Authorization": f"Bearer {jwt_token}"}
+    url = f"{NESTJS_API_URL}/projects/{project_id}/graph/edges/{edge_id}"
+    try:
+        response = requests.delete(url, headers=headers)
+        if response.status_code in (200, 204):
+            return {"success": True, "edgeId": edge_id}
+        return {"error": f"Failed to delete edge. Status: {response.status_code}", "detail": response.text}
+    except Exception as e:
+        return {"error": f"Exception deleting edge: {str(e)}"}
+
+
+def list_project_node_types(project_id: str, jwt_token: str) -> dict:
+    """GET /projects/:pid/graph/node-types."""
+    headers = {"Authorization": f"Bearer {jwt_token}"}
+    url = f"{NESTJS_API_URL}/projects/{project_id}/graph/node-types"
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        return {"error": f"Failed to list node types. Status: {response.status_code}", "detail": response.text}
+    except Exception as e:
+        return {"error": f"Exception listing node types: {str(e)}"}
+
+
+def list_project_files(project_id: str, jwt_token: str) -> dict:
+    """List all files uploaded to the current project."""
+    headers = {"Authorization": f"Bearer {jwt_token}"}
+    url = f"{NESTJS_API_URL}/files/project/{project_id}"
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        return {"error": f"Failed to list files. Status: {response.status_code}", "detail": response.text}
+    except Exception as e:
+        return {"error": f"Exception listing files: {str(e)}"}
+
+
+def read_file_content(project_id: str, file_id: str, jwt_token: str) -> dict:
+    """Read parsed text content of a single uploaded file."""
+    headers = {"Authorization": f"Bearer {jwt_token}"}
+    url = f"{NESTJS_API_URL}/files/{file_id}/content"
+    try:
+        response = requests.get(url, headers=headers, timeout=60)
+        if response.status_code == 200:
+            return response.json()
+        return {"error": f"Failed to read file. Status: {response.status_code}", "detail": response.text}
+    except Exception as e:
+        return {"error": f"Exception reading file: {str(e)}"}
+
+
 def traverse_project_graph(project_id: str, jwt_token: str, start_node_id: str, depth: int = 3) -> dict:
     """Traverses the graph starting from a specific node."""
+    # ponytail: defensive guard against LLM hallucinating "None" / "null" / empty ids — earlier
+    # the AI passed Python's repr(None)="None" into the URL and BE logs spammed with /traverse/None.
+    if start_node_id is None or str(start_node_id).strip() in ("", "None", "null"):
+        return {"error": "missing start_node_id", "nodes": [], "edges": []}
     headers = {"Authorization": f"Bearer {jwt_token}"}
     url = f"{NESTJS_API_URL}/projects/{project_id}/graph/traverse/{start_node_id}?depth={depth}"
     try:
@@ -200,7 +282,9 @@ def llm_hybrid_search(project_id: str, query: str, jwt_token: str, k: int = None
         # Step 3: Traverse from each top node
         discovered_nodes = {}
         for node, score in top_nodes:
-            node_id = node.get('id')
+            # ponytail: BE returns 'nodeId'; earlier code only read 'id' which is always None,
+            # so traversed_nodes loop received Python's repr(None)="None" → /traverse/None 500s.
+            node_id = node.get('nodeId') or node.get('id') or node.get('elementId')
             if node_id and node_id not in discovered_nodes:
                 discovered_nodes[node_id] = {**node, "similarity_score": score}
 
@@ -210,7 +294,7 @@ def llm_hybrid_search(project_id: str, query: str, jwt_token: str, k: int = None
             if "error" not in traversal_result:
                 traversed_nodes = traversal_result if isinstance(traversal_result, list) else (traversal_result.get("nodes") or traversal_result.get("data") or [])
                 for tnode in traversed_nodes:
-                    tid = tnode.get('id')
+                    tid = tnode.get('nodeId') or tnode.get('id') or tnode.get('elementId')
                     if tid and tid not in discovered_nodes:
                         discovered_nodes[tid] = tnode
 

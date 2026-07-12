@@ -97,9 +97,20 @@ class EmbeddingService:
             backoff = 1.0
             for attempt in range(retries):
                 try:
-                    embeddings_batch = await self.embeddings.aembed_documents(batch)
+                    embeddings_batch = await asyncio.wait_for(
+                        self.embeddings.aembed_documents(batch),
+                        timeout=settings.EMBED_PER_REQUEST_TIMEOUT_SEC,
+                    )
                     results[idx] = embeddings_batch
                     return
+                except asyncio.TimeoutError:
+                    # Treat as transient — proxy may have stalled briefly.
+                    # Retry budget applies; last attempt raises TimeoutError.
+                    if attempt == retries - 1:
+                        raise
+                    await asyncio.sleep(backoff)
+                    backoff *= 2.0
+                    continue
                 except Exception as e:
                     msg = str(e)
                     if any(token in msg for token in _NON_RETRYABLE_TOKENS):
@@ -128,7 +139,17 @@ class EmbeddingService:
                 pending.add(task)
                 task.add_done_callback(lambda t, s=sem: s.release())
             if pending:
-                await asyncio.gather(*pending, return_exceptions=False)
+                # return_exceptions=True: one bad batch must not kill siblings.
+                # We re-raise the first non-cancelled exception below so the
+                # caller still sees the failure — only CancelledError stays
+                # silent (that's how cooperative cancellation propagates).
+                outcomes = await asyncio.gather(*pending, return_exceptions=True)
+                first_error = next(
+                    (o for o in outcomes if not isinstance(o, asyncio.CancelledError)),
+                    None,
+                )
+                if first_error is not None:
+                    raise first_error
 
         if settings.EMBED_STAGE_TIMEOUT_SEC > 0:
             await asyncio.wait_for(_drain(), timeout=settings.EMBED_STAGE_TIMEOUT_SEC)

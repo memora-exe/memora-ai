@@ -63,6 +63,15 @@ class Settings:
     # (proxy stuck, network dead) we abort and mark the file failed instead of
     # burning the whole ingestion slot for hours. 0 = no cap.
     EMBED_STAGE_TIMEOUT_SEC = int(os.getenv("EMBED_STAGE_TIMEOUT_SEC", "0"))
+    # Per-request cap on a single /v1/embeddings call. If the proxy stalls,
+    # this raises asyncio.TimeoutError inside _run_one so the retry budget
+    # kicks in instead of hanging forever. ponytail: bump to 60s if the
+    # upstream legitimately needs >30s for big batch payloads.
+    EMBED_PER_REQUEST_TIMEOUT_SEC = int(os.getenv("EMBED_PER_REQUEST_TIMEOUT_SEC", "30"))
+    # Hard cap on a single chat turn (non-stream + stream). Without this,
+    # LiteLLM `acompletion(stream=True)` waits for the first upstream chunk
+    # forever when the proxy drops the connection mid-stream.
+    CHAT_LLM_TIMEOUT_SEC = int(os.getenv("CHAT_LLM_TIMEOUT_SEC", "90"))
 
     HYBRID_TOP_K = int(os.getenv("HYBRID_TOP_K", "5"))
     HYBRID_TRAVERSE_DEPTH = int(os.getenv("HYBRID_TRAVERSE_DEPTH", "2"))
