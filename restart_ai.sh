@@ -14,17 +14,24 @@ try:
 except Exception:
     pass
 
-# 1. Kill any existing uvicorn process on port 8000
-print("Killing existing uvicorn (port 8000)...")
+# Read port from .env
+PORT = 8000
+for line in open(".env").read().splitlines():
+    if line.startswith("PORT="):
+        PORT = int(line.split("PORT=")[1].strip())
+        break
+print(f"Target port: {PORT}")
+
+# 1. Kill any existing uvicorn process on port PORT
+print(f"Killing existing uvicorn (port {PORT})...")
 try:
-    # Use netstat to find PID
     r = subprocess.run(
         ["netstat", "-ano"],
         capture_output=True, text=True, timeout=10
     )
     pids = set()
     for line in r.stdout.splitlines():
-        if ":8000" in line and "LISTENING" in line:
+        if f":{PORT}" in line and "LISTENING" in line:
             parts = line.split()
             if parts and parts[-1].isdigit():
                 pids.add(parts[-1])
@@ -54,16 +61,21 @@ except FileNotFoundError:
     pass
 
 # 2. Start uvicorn in the background
-print("Starting uvicorn (gemini-2.5-flash)...")
+print(f"Starting uvicorn on port {PORT}...")
 env = os.environ.copy()
-env["GOOGLE_API_KEY"] = open(".env").read().split("GOOGLE_API_KEY=")[1].split("\n")[0].strip()
+api_key = ""
+for line in open(".env").read().splitlines():
+    if line.startswith("GOOGLE_API_KEY="):
+        api_key = line.split("GOOGLE_API_KEY=")[1].strip()
+        break
+env["GOOGLE_API_KEY"] = api_key
 
 # Run in background — detached process
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 subprocess.Popen(
     ["./venv/Scripts/python.exe", "-m", "uvicorn", "app.main:app",
-     "--host", "0.0.0.0", "--port", "8000", "--reload"],
+     "--host", "0.0.0.0", "--port", str(PORT)],
     env=env,
     creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
     close_fds=True,
@@ -76,7 +88,7 @@ print("Waiting for service to be ready...")
 import requests
 for i in range(30):
     try:
-        r = requests.get("http://localhost:8000/health", timeout=2)
+        r = requests.get(f"http://localhost:{PORT}/health", timeout=2)
         if r.status_code == 200:
             print(f"Service ready! Health: {r.json()}")
             sys.exit(0)

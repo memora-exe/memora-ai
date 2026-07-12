@@ -7,7 +7,7 @@ import httpx
 import aio_pika
 from app.core.config import settings
 from app.services.document_processor import process_document
-from app.services.embedding_service import embedding_service
+from app.services.embedding_service import embedding_service, EmbeddingCancelledError
 from app.services.vector_store import insert_chunks
 from app.services.concept_extractor import extract_concepts
 from app.services.graph_writer import write_graph
@@ -204,7 +204,10 @@ async def handle_message(message: aio_pika.IncomingMessage, exchange):
                     cancelled = True
                     raise FileCancelledError(file_id)
 
-                embeddings = embedding_service.get_embeddings(chunks)
+                embeddings = await embedding_service.aget_embeddings(
+                    chunks,
+                    cancel=lambda: _is_file_active(file_id, project_id),
+                )
 
                 # C3: cancel check before insert
                 if not await _is_file_active(file_id, project_id):
@@ -256,7 +259,7 @@ async def handle_message(message: aio_pika.IncomingMessage, exchange):
                 await publish_status(exchange, file_id, project_id, True)
                 print(f"Successfully processed file {file_id}")
 
-            except FileCancelledError:
+            except (FileCancelledError, EmbeddingCancelledError):
                 # Don't publish processed/failed — job aborted.
                 print(
                     f"FileCancelledError: skipping status publish for {file_id}",

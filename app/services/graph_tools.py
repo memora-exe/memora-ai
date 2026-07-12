@@ -124,15 +124,17 @@ def _rank_candidate_nodes(chunks: list, nodes: list, query: str, k: int) -> list
             # Fuzzy: check if chunk content mentions node names (simple substring)
             chunk_content = chunk.get('content', '').lower()
             for node in nodes:
-                node_label = node.get('label', '').lower()
+                node_label = node.get('label') or node.get('name') or ''
+                node_label = node_label.lower() if isinstance(node_label, str) else ''
                 if node_label and len(node_label) > 3 and node_label in chunk_content:
-                    chunk_node_refs.add(node.get('id'))
+                    chunk_node_refs.add(node.get('id') or node.get('nodeId') or node.get('elementId'))
 
     ranked = []
     for node in nodes:
         score = 0.0
-        node_id = node.get('id')
-        node_label = node.get('label', '').lower()
+        node_id = node.get('id') or node.get('nodeId') or node.get('elementId')
+        node_label = node.get('label') or node.get('name') or ''
+        node_label = node_label.lower() if isinstance(node_label, str) else ''
 
         # Keyword match in label
         node_tokens = set(node_label.split())
@@ -150,7 +152,7 @@ def _rank_candidate_nodes(chunks: list, nodes: list, query: str, k: int) -> list
         if node_id in chunk_node_refs:
             score += 5.0
 
-        if score > 0:
+        if score > 0 or len(ranked) < k:
             ranked.append((node, score))
 
     ranked.sort(key=lambda x: x[1], reverse=True)
@@ -206,7 +208,7 @@ def llm_hybrid_search(project_id: str, query: str, jwt_token: str, k: int = None
             traversal_result = traverse_project_graph(project_id, jwt_token, node_id, depth=traverse_depth)
 
             if "error" not in traversal_result:
-                traversed_nodes = traversal_result if isinstance(traversal_result, list) else traversal_result.get("nodes", [])
+                traversed_nodes = traversal_result if isinstance(traversal_result, list) else (traversal_result.get("nodes") or traversal_result.get("data") or [])
                 for tnode in traversed_nodes:
                     tid = tnode.get('id')
                     if tid and tid not in discovered_nodes:

@@ -52,6 +52,17 @@ class Settings:
     # surfaces as a pgvector dimension error on the first insert.
     EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
     PGVECTOR_COLUMN_DIM = int(os.getenv("PGVECTOR_COLUMN_DIM", "1536"))
+    # Phase 5 — Embedding fan-out tuning (refactored 2026-07-12 to fix
+    # "AI stuck embedding after file delete" + "ingestion takes 20+ min on
+    # big files"). Default batch_size=1 dodges a proxy that returns empty
+    # data on bulk /v1/embeddings payloads; concurrency=8 runs N single-chunk
+    # requests in parallel instead of serially. Tune via .env.
+    EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "1"))
+    EMBED_CONCURRENCY = int(os.getenv("EMBED_CONCURRENCY", "8"))
+    # Hard cap on total wall-clock for a single file's embed stage. If exceeded
+    # (proxy stuck, network dead) we abort and mark the file failed instead of
+    # burning the whole ingestion slot for hours. 0 = no cap.
+    EMBED_STAGE_TIMEOUT_SEC = int(os.getenv("EMBED_STAGE_TIMEOUT_SEC", "0"))
 
     HYBRID_TOP_K = int(os.getenv("HYBRID_TOP_K", "5"))
     HYBRID_TRAVERSE_DEPTH = int(os.getenv("HYBRID_TRAVERSE_DEPTH", "2"))

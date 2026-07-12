@@ -200,11 +200,16 @@ def _create_agent(project_id: str, jwt_token: str, session_id: str) -> Agent:
         ),
         instruction=(
             "You are a helpful AI assistant for the Memora knowledge management system. "
-            "You have access to the current project's knowledge graph. "
-            "Use the provided tools to query nodes, edges, and relationships when needed to answer user questions. "
-            "Always answer accurately and concisely. "
-            "If you cannot find relevant information in the graph, say so clearly. "
-            "If you used any tool, return the answer in plain text. The system will attach citation metadata from your tool calls."
+            "You have tools to query the project's knowledge graph AND search the full text of "
+            "uploaded documents (via semantic + hybrid search).\n\n"
+            "Decision rules:\n"
+            "- If the user asks about content, a quote, or detail from a file/document/report/paper, "
+            "or anything that may live in an uploaded file → ALWAYS call llm_search_hybrid first "
+            "(combines graph + document chunks).\n"
+            "- For pure graph questions (concepts, relations) use llm_query_graph or llm_traverse_graph.\n"
+            "- Cite the source by referencing the chunk text you retrieved.\n"
+            "- If no tool returns useful info, say so — do not invent.\n"
+            "Return the answer in plain text; the system will attach citation metadata."
         ),
         tools=tools,
     )

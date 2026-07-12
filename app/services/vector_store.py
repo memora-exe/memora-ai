@@ -43,15 +43,16 @@ def search(project_id: str, query_embedding: list, k=10) -> list:
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
+            vec_str = "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
             cur.execute(
                 """
-                SELECT id, file_id, chunk_index, content, metadata, embedding <=> %s as distance
+                SELECT id, file_id, chunk_index, content, metadata, embedding <=> %s::vector as distance
                 FROM document_chunk
                 WHERE project_id = %s
-                ORDER BY embedding <=> %s
+                ORDER BY embedding <=> %s::vector
                 LIMIT %s
                 """,
-                (query_embedding, project_id, query_embedding, k)
+                (vec_str, project_id, vec_str, k)
             )
             rows = cur.fetchall()
             results = []

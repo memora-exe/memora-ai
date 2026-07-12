@@ -30,6 +30,17 @@ if (-not (Test-Path '.env')) {
 }
 
 # 4. Chay server (set PYTHONPATH=. de Python thay package "app.*")
-Write-Host '>>> Chay FastAPI server (Ctrl+C de dung)...' -ForegroundColor Green
+# Bo --reload: uvicorn reload spawn worker con, Ctrl+C PowerShell khong forward tin hieu,
+# worker giu port -> khong thoat duoc. Dung restart_ai.py neu can reload.
+if (-not $env:PORT) {
+    if (Test-Path '.env') {
+        foreach ($line in Get-Content '.env') {
+            if ($line -match '^PORT=(\d+)') { $env:PORT = $Matches[1]; break }
+        }
+    }
+    if (-not $env:PORT) { $env:PORT = '8000' }
+}
+Write-Host ">>> Chay FastAPI server tren port $env:PORT (Ctrl+C de dung)..." -ForegroundColor Green
 $env:PYTHONPATH = "$PWD"
-& .\venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+& .\venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port $env:PORT
+if ($LASTEXITCODE -ne 0) { Write-Host "uvicorn exited with code $LASTEXITCODE" -ForegroundColor Red }
