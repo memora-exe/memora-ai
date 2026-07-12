@@ -17,24 +17,43 @@ class EmbeddingService:
         return self.get_embeddings([text])[0]
 
     def get_embeddings(self, texts: list[str]) -> list[list[float]]:
-        results = []
-        batch_size = 100
+        results: list[list[float]] = []
+        # OpenAI /v1/embeddings accepts an array as `input`, but third-party
+        # proxies (OpenRouter, Gemini compat, ...) often silently return
+        # 200 OK with `data: []` for batched payloads even when a single
+        # string returns valid data. Verified against
+        # openrouter/nvidia/llama-nemotron-embed-vl-1b-v2:free on
+        # kepter.id.vn:20128 — single input works, batch=100 returns empty.
+        # Trade-off: more HTTP calls, far fewer empty-data failures.
+        batch_size = 1
+        # Errors that indicate a contract violation with the upstream provider
+        # (200 OK but unparseable / empty body). Retrying won't help — bail
+        # fast instead of burning 31s of backoff for the same broken payload.
+        non_retryable = ("No embedding data received", "missing field", "data is not of type")
+        retries = 3
+        backoff = 1.0
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
 
-            retries = 5
-            backoff = 1.0
             for attempt in range(retries):
                 try:
-                    # Retrieve embeddings for the batch
                     embeddings_batch = self.embeddings.embed_documents(batch)
                     results.extend(embeddings_batch)
                     break
                 except Exception as e:
+                    msg = str(e)
+                    if any(token in msg for token in non_retryable):
+                        print(
+                            f"[embedding] non-retryable error on batch "
+                            f"({len(batch)} chunks, attempt {attempt + 1}): {msg}",
+                            flush=True,
+                        )
+                        raise
                     if attempt == retries - 1:
-                        raise e
+                        raise
                     time.sleep(backoff)
                     backoff *= 2.0
+            backoff = 1.0
         return results
 
 embedding_service = EmbeddingService()

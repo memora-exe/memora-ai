@@ -1,11 +1,21 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# override=True so a fresh `.env` edit always wins over shell exports.
+# Without this, `export OPENAI_EMBED_MODEL=text-embedding-3-small` set once
+# in a terminal persists across `.env` edits, and the user sees "embed fails
+# even though I changed .env" — silent override, very confusing.
+load_dotenv(override=True)
 
 class Settings:
     PORT = int(os.getenv("PORT", 8000))
     NESTJS_API_URL = os.getenv("NESTJS_API_URL", "http://localhost:3000")
+    # Shared secret for service-to-service internal endpoints on NestJS
+    # (/internal/files/:id/status). Required for the cancel/status sync paths
+    # in rabbitmq_consumer.py. The same value MUST be set as
+    # MEMORA_INTERNAL_TOKEN on the BE side, where InternalTokenGuard compares
+    # it against the X-Internal-Token header.
+    MEMORA_INTERNAL_TOKEN = os.getenv("MEMORA_INTERNAL_TOKEN") or ""
 
     # Legacy Google AI key — still consumed by agent_service.py which uses
     # google-genai / google-adk (those SDKs read GOOGLE_API_KEY from os.environ).
@@ -30,7 +40,16 @@ class Settings:
     # single key+URL pair can serve both chat and embeddings.
     OPENAI_EMBED_BASE_URL = os.getenv("OPENAI_EMBED_BASE_URL") or None
     OPENAI_EMBED_API_KEY = os.getenv("OPENAI_EMBED_API_KEY") or None
+    # NOTE: the previous default (`text-embedding-3-small`) is an OpenAI-only
+    # model id; on OpenRouter-compat proxies it returns 200 OK with empty
+    # `data: []` and the SDK raises `ValueError("No embedding data received")`.
+    # Set OPENAI_EMBED_MODEL in .env to whatever your proxy actually exposes,
+    # e.g. `openrouter/nvidia/llama-nemotron-embed-vl-1b-v2:free` (768-dim).
     OPENAI_EMBED_MODEL = os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-small")
+    # DB schema is `document_chunk.embedding vector(768)` (see
+    # docs/plans/phase-1-diagrams.md). The dim defaults here MUST match —
+    # validate_embedding_dim() refuses to boot otherwise, and silent mismatch
+    # surfaces as a pgvector dimension error on the first insert.
     EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
     PGVECTOR_COLUMN_DIM = int(os.getenv("PGVECTOR_COLUMN_DIM", "1536"))
 

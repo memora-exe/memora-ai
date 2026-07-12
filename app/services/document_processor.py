@@ -1,32 +1,41 @@
-import os
-import fitz  # PyMuPDF
-import docx
+"""All uploaded files are converted to Markdown via MarkItDown before any
+downstream AI step (chunking, embedding, concept extraction).
+
+The previous version had per-extension branches (pypdf / python-docx / text
+fallback). MarkItDown handles PDF, DOCX, PPTX, XLSX, HTML, images (with OCR),
+audio, and plain text in a single pipeline, which keeps downstream chunking
+language-agnostic and preserves document structure (headings, lists, tables,
+code blocks) for better embedding quality.
+
+`process_document()` keeps the same signature `(file_path: str) -> list[str]`
+so callers (rabbitmq_consumer) don't need to change.
+"""
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from markitdown import MarkItDown
 
-def parse_pdf(file_path: str) -> str:
-    text = ""
-    with fitz.open(file_path) as doc:
-        for page in doc:
-            text += page.get_text()
-    return text
+# Module-level singleton — initializing MarkItDown loads its converter registry
+# (pdf, docx, pptx, xlsx, image OCR, ...). Reusing one instance avoids the import
+# overhead on every uploaded file.
+_MARKITDOWN = MarkItDown()
 
-def parse_docx(file_path: str) -> str:
-    doc = docx.Document(file_path)
-    return "\n".join([p.text for p in doc.paragraphs])
+_SPLITTER = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
 
-def parse_text(file_path: str) -> str:
-    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-        return f.read()
+
+def _to_markdown(file_path: str) -> str:
+    result = _MARKITDOWN.convert(file_path)
+    # `.markdown` is the canonical field; `.text_content` is the alias kept for
+    # older markitdown releases.
+    md = getattr(result, "markdown", None) or getattr(result, "text_content", "")
+    if not md or not md.strip():
+        raise ValueError(
+            f"MarkItDown returned empty content for {file_path}. "
+            "File may be unscannable (scanned PDF without OCR, corrupted, "
+            "or unsupported format)."
+        )
+    return md
+
 
 def process_document(file_path: str) -> list[str]:
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext == ".pdf":
-        text = parse_pdf(file_path)
-    elif ext in [".docx", ".doc"]:
-        text = parse_docx(file_path)
-    else:
-        text = parse_text(file_path)
-
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = splitter.split_text(text)
-    return chunks
+    markdown = _to_markdown(file_path)
+    return _SPLITTER.split_text(markdown)

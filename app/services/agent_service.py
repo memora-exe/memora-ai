@@ -2,6 +2,7 @@ import asyncio
 import os
 from google.genai import types
 from google.adk import Agent
+from google.adk.models.lite_llm import LiteLlm
 from google.adk.runners import InMemoryRunner
 from google.adk.sessions import Session, InMemorySessionService
 from google.adk.events.event import Event
@@ -15,6 +16,9 @@ from app.services.graph_tools import (
     traverse_project_graph,
     llm_search_by_embedding,
     llm_hybrid_search,
+    create_project_node,
+    update_project_node,
+    delete_project_node,
 )
 
 logger = get_logger("AgentService")
@@ -120,7 +124,68 @@ def _build_graph_tools(project_id: str, jwt_token: str, session_id: str) -> list
         _tool_metadata[f"{project_id}:{session_id}"] = result
         return result
 
-    return [llm_get_all_nodes, llm_get_all_edges, llm_query_graph, llm_traverse_graph, llm_search_vector, llm_search_hybrid]
+    def llm_create_node(node_name: str, node_type_id: str = None, node_id: str = None) -> dict:
+        """Create a new knowledge graph node in the current project.
+        Use this tool when the user asks to add a new concept, entity, person, or topic to the project.
+
+        Args:
+            node_name (str): The display name for the new node.
+            node_type_id (str, optional): The ID of an existing node type to assign.
+            node_id (str, optional): Client-provided UUID for the node. If omitted, server assigns one.
+
+        Returns:
+            dict: The created node with its server-assigned ID and properties.
+        """
+        payload = {"nodeName": node_name}
+        if node_type_id:
+            payload["nodeTypeId"] = node_type_id
+        if node_id:
+            payload["nodeId"] = node_id
+        return create_project_node(project_id, jwt_token, payload)
+
+    def llm_update_node(node_id: str, node_name: str = None, node_type_id: str = None) -> dict:
+        """Update an existing knowledge graph node in the current project.
+        Use this when the user asks to rename a node or change its type.
+
+        Args:
+            node_id (str): The ID of the node to update.
+            node_name (str, optional): New display name. Omit to keep current.
+            node_type_id (str, optional): New node type ID. Omit to keep current.
+
+        Returns:
+            dict: The updated node.
+        """
+        payload = {"nodeId": node_id}
+        if node_name is not None:
+            payload["nodeName"] = node_name
+        if node_type_id is not None:
+            payload["nodeTypeId"] = node_type_id
+        return update_project_node(project_id, jwt_token, payload)
+
+    def llm_delete_node(node_id: str) -> dict:
+        """Delete a knowledge graph node from the current project.
+        Use this when the user explicitly asks to remove a node.
+        This action is irreversible and will also remove all edges connected to the node.
+
+        Args:
+            node_id (str): The ID of the node to delete.
+
+        Returns:
+            dict: Confirmation with the deleted node's ID on success, or error details.
+        """
+        return delete_project_node(project_id, jwt_token, node_id)
+
+    return [
+        llm_get_all_nodes,
+        llm_get_all_edges,
+        llm_query_graph,
+        llm_traverse_graph,
+        llm_search_vector,
+        llm_search_hybrid,
+        llm_create_node,
+        llm_update_node,
+        llm_delete_node,
+    ]
 
 
 def _create_agent(project_id: str, jwt_token: str, session_id: str) -> Agent:
@@ -128,7 +193,11 @@ def _create_agent(project_id: str, jwt_token: str, session_id: str) -> Agent:
     tools = _build_graph_tools(project_id, jwt_token, session_id)
     return Agent(
         name="memora_assistant",
-        model=settings.OPENAI_MODEL,
+        model=LiteLlm(
+            model=f"openai/{settings.OPENAI_MODEL}",
+            api_base=settings.OPENAI_BASE_URL,
+            api_key=settings.OPENAI_API_KEY,
+        ),
         instruction=(
             "You are a helpful AI assistant for the Memora knowledge management system. "
             "You have access to the current project's knowledge graph. "

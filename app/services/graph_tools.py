@@ -42,6 +42,45 @@ def query_project_graph(project_id: str, jwt_token: str, query_params: dict) -> 
     except Exception as e:
         return {"error": f"Exception occurred while querying graph: {str(e)}"}
 
+def create_project_node(project_id: str, jwt_token: str, payload: dict) -> dict:
+    """POST a new node to the project graph. Returns the created node or error."""
+    headers = {"Authorization": f"Bearer {jwt_token}"}
+    url = f"{NESTJS_API_URL}/projects/{project_id}/graph/nodes"
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        if response.status_code in (200, 201):
+            return response.json()
+        return {"error": f"Failed to create node. Status: {response.status_code}", "detail": response.text}
+    except Exception as e:
+        return {"error": f"Exception creating node: {str(e)}"}
+
+
+def update_project_node(project_id: str, jwt_token: str, payload: dict) -> dict:
+    """PATCH an existing node in the project graph. Returns the updated node or error."""
+    headers = {"Authorization": f"Bearer {jwt_token}"}
+    url = f"{NESTJS_API_URL}/projects/{project_id}/graph/nodes"
+    try:
+        response = requests.patch(url, headers=headers, json=payload)
+        if response.status_code in (200, 201):
+            return response.json()
+        return {"error": f"Failed to update node. Status: {response.status_code}", "detail": response.text}
+    except Exception as e:
+        return {"error": f"Exception updating node: {str(e)}"}
+
+
+def delete_project_node(project_id: str, jwt_token: str, node_id: str) -> dict:
+    """DELETE a node by ID from the project graph. Returns success or error."""
+    headers = {"Authorization": f"Bearer {jwt_token}"}
+    url = f"{NESTJS_API_URL}/projects/{project_id}/graph/nodes/{node_id}"
+    try:
+        response = requests.delete(url, headers=headers)
+        if response.status_code in (200, 204):
+            return {"success": True, "nodeId": node_id}
+        return {"error": f"Failed to delete node. Status: {response.status_code}", "detail": response.text}
+    except Exception as e:
+        return {"error": f"Exception deleting node: {str(e)}"}
+
+
 def traverse_project_graph(project_id: str, jwt_token: str, start_node_id: str, depth: int = 3) -> dict:
     """Traverses the graph starting from a specific node."""
     headers = {"Authorization": f"Bearer {jwt_token}"}
