@@ -175,6 +175,22 @@ def traverse_project_graph(project_id: str, jwt_token: str, start_node_id: str, 
     except Exception as e:
         return {"error": f"Exception occurred while traversing graph: {str(e)}"}
 
+
+def llm_highlight_nodes(node_ids, _jwt_token: str = None, _project_id: str = None, _session_id: str = None):
+    """Mark nodes as highlighted in the UI. Does NOT mutate the graph; only feeds the
+    FE's `searchHighlightIds` slice via citation metadata. The actual mutation-tracker
+    write happens in agent_service._build_graph_tools where this is wrapped with the
+    closure capture of (project_id, session_id) — we keep this function stateless so it
+    can be registered as an ADK FunctionTool without injected-argument gymnastics."""
+    cleaned = [str(n) for n in (node_ids or []) if n]
+    return {"highlighted_nodes": cleaned, "_highlight": {"action": "highlighted", "kind": "nodes", "ids": cleaned}}
+
+
+def llm_highlight_edges(edge_ids, _jwt_token: str = None, _project_id: str = None, _session_id: str = None):
+    """Mark edges as highlighted in the UI. Same plumbing as `llm_highlight_nodes`."""
+    cleaned = [str(e) for e in (edge_ids or []) if e]
+    return {"highlighted_edges": cleaned, "_highlight": {"action": "highlighted", "kind": "edges", "ids": cleaned}}
+
 def llm_search_by_embedding(project_id: str, query: str, k: int = 5) -> list:
     """Search document chunks using semantic similarity (pgvector) in a project."""
     try:

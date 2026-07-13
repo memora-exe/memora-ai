@@ -1,6 +1,8 @@
 import asyncio
 import json
 import os
+
+import httpx
 from google.genai import types
 from google.adk import Agent
 from google.adk.models.lite_llm import LiteLlm
@@ -25,6 +27,8 @@ from app.services.graph_tools import (
     list_project_node_types,
     list_project_files,
     read_file_content,
+    llm_highlight_nodes,
+    llm_highlight_edges,
 )
 from app.prompts.loader import render_prompt
 
@@ -77,6 +81,7 @@ def _build_citation_metadata(tool_result: dict) -> dict:
             "updated": {"nodes": [], "edges": []},
             "deleted": {"nodes": [], "edges": []},
         }),
+        "highlighted":     tool_result.get(_MUT_KEY, {}).get("highlighted", {"nodes": [], "edges": []}),
     }
 
 
@@ -99,6 +104,10 @@ def _build_graph_tools(project_id: str, jwt_token: str, session_id: str) -> list
             "updated": {"nodes": [], "edges": []},
             "deleted": {"nodes": [], "edges": []},
         })
+        # ponytail: UI-action buckets like `highlighted` aren't in the default
+        # dict above — `setdefault` here lazy-creates them with the same shape so
+        # `llm_highlight` (and any future tool) can extend without KeyError.
+        bucket.setdefault(action, {"nodes": [], "edges": []})
         if nodes:
             bucket[action]["nodes"].extend(n for n in nodes if n)
         if edges:
@@ -350,6 +359,20 @@ def _build_graph_tools(project_id: str, jwt_token: str, session_id: str) -> list
         """
         return list_project_node_types(project_id, jwt_token)
 
+    def llm_highlight(nodes_or_edges: str = "nodes", ids: list = None) -> dict:
+        """UI-only highlight. Pass `nodes_or_edges` ∈ {nodes, edges} and `ids` list.
+
+        Wraps the stateless `llm_highlight_nodes`/`llm_highlight_edges` from
+        graph_tools with the closure-captured _record_mutation so ids show up in
+        meta.mutatedEntities.highlighted and propagate to FE searchHighlightIds.
+        """
+        kind = (nodes_or_edges or "nodes").lower()
+        clean_ids = [str(i) for i in (ids or []) if i]
+        if not clean_ids:
+            return {"error": "no ids provided", "_highlight": {"action": "highlighted", "kind": kind, "ids": []}}
+        _record_mutation("highlighted", **{kind: clean_ids})
+        return {"highlighted_nodes": clean_ids} if kind == "nodes" else {"highlighted_edges": clean_ids}
+
     return [
         llm_get_all_nodes,
         llm_get_all_edges,
@@ -367,6 +390,7 @@ def _build_graph_tools(project_id: str, jwt_token: str, session_id: str) -> list
         llm_list_node_types,
         llm_list_files,
         llm_read_file,
+        llm_highlight,
     ]
 
 
@@ -504,21 +528,70 @@ async def process_chat_message_stream(
         accumulated = ""
         event_count = 0
         try:
-            async for event in _aiter_with_timeout(
-                runner.run_async(
-                    user_id="default",
-                    session_id=session_id,
-                    new_message=content,
-                ),
-                timeout=settings.CHAT_LLM_TIMEOUT_SEC,
-            ):
-                event_count += 1
-                if event.content:
-                    parts = event.content.parts
-                    if parts:
-                        text_chunk = parts[0].text or ""
-                        accumulated += text_chunk
-                        yield text_chunk
+            # ponytail: outer `wait_for` provides an OVERALL turn deadline.
+            # The inner `_aiter_with_timeout` only protects between events; if
+            # the runner is parked inside one tool HTTP call (e.g. llm_search_hybrid
+            # against a starved LiteLLM pool during file ingestion), per-step never
+            # fires. `CHAT_TURN_DEADLINE_SEC` is the hard ceiling so the SSE stream
+            # always ends — yields error JSON then [DONE] on timeout.
+            import time as _time
+            turn_started = _time.monotonic()
+            task_id = f"{session_id}:{int(turn_started*1000)}"
+            logger.info(f"[chat] turn {task_id} started (project={project_id})")
+
+            async def _runner_iter():
+                async for event in _aiter_with_timeout(
+                    runner.run_async(
+                        user_id="default",
+                        session_id=session_id,
+                        new_message=content,
+                    ),
+                    timeout=settings.CHAT_LLM_TIMEOUT_SEC,
+                ):
+                    yield event
+
+            try:
+                # ponytail: asyncio.wait_for() returns a coroutine, not an async
+                # iterator — `async for` over it raised TypeError and aborted every
+                # stream. asyncio.timeout() (Py 3.11+) scopes the deadline to the
+                # loop body so the iterator drains normally and raises TimeoutError
+                # on exit instead.
+                async with asyncio.timeout(settings.CHAT_TURN_DEADLINE_SEC):
+                    async for event in _runner_iter():
+                        event_count += 1
+                        if event.content:
+                            parts = event.content.parts
+                            if parts:
+                                text_chunk = parts[0].text or ""
+                                accumulated += text_chunk
+                                yield text_chunk
+            except asyncio.TimeoutError as _turn_deadline:
+                logger.error(
+                    f"[chat] turn {task_id} deadline {settings.CHAT_TURN_DEADLINE_SEC}s exceeded"
+                )
+                # ponytail: Bug 2 — on the deadline path, `stream.on('end')` on the
+                # BE side won't fire (the deadline happens in our `_runner_iter`,
+                # BE only sees a mid-stream abort). Persist whatever we accumulated
+                # so the user sees partial progress on reload. Fire-and-forget httpx
+                # so the SSE path can close immediately. The local `if accumulated`
+                # guards against empty/blank messages that would create empty rows.
+                if accumulated:
+                    try:
+                        async with httpx.AsyncClient(timeout=10) as client:
+                            r = await client.post(
+                                f"{settings.NESTJS_API_URL}/projects/{project_id}/ai/sessions/{session_id}/persist",
+                                headers={"Authorization": f"Bearer {jwt_token}"},
+                                json={"content": accumulated, "toolCalls": _get_metadata(project_id, session_id)},
+                            )
+                            logger.info(f"[chat] turn {task_id} persist on deadline: {r.status_code}")
+                    except Exception as _persist_err:
+                        logger.warning(f"[chat] turn {task_id} persist on deadline failed (non-fatal): {_persist_err}")
+                yield json.dumps({"error": f"turn deadline {settings.CHAT_TURN_DEADLINE_SEC}s exceeded"})
+                return
+            finally:
+                logger.info(
+                    f"[chat] turn {task_id} done in {_time.monotonic()-turn_started:.1f}s, events={event_count}"
+                )
         except asyncio.TimeoutError:
             logger.error(f"Runner run_async timed out after {settings.CHAT_LLM_TIMEOUT_SEC}s (session_id={session_id})")
             yield json.dumps({"error": f"LLM timed out after {settings.CHAT_LLM_TIMEOUT_SEC}s"})

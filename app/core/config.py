@@ -72,6 +72,13 @@ class Settings:
     # LiteLLM `acompletion(stream=True)` waits for the first upstream chunk
     # forever when the proxy drops the connection mid-stream.
     CHAT_LLM_TIMEOUT_SEC = int(os.getenv("CHAT_LLM_TIMEOUT_SEC", "90"))
+    # ponytail: OUTER overall turn deadline. `CHAT_LLM_TIMEOUT_SEC` only wraps
+    # individual `__anext__()` calls inside `_aiter_with_timeout`, so if the
+    # runner blocks inside a single tool HTTP call (e.g. llm_search_hybrid
+    # waiting on a starved LiteLLM pool during file ingest), per-step never
+    # fires. CHAT_TURN_DEADLINE_SEC is the hard cap on the whole turn so the
+    # SSE stream always closes within a bounded window.
+    CHAT_TURN_DEADLINE_SEC = int(os.getenv("CHAT_TURN_DEADLINE_SEC", "180"))
 
     HYBRID_TOP_K = int(os.getenv("HYBRID_TOP_K", "5"))
     HYBRID_TRAVERSE_DEPTH = int(os.getenv("HYBRID_TRAVERSE_DEPTH", "2"))
