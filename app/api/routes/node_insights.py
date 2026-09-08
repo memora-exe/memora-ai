@@ -3,18 +3,15 @@
 POST /api/node-insights/summary
 Body: { node_id, project_id, jwt_token, level: beginner|intermediate|advanced }
 Returns: { summary }
-
-Reuses traverse_project_graph from graph_tools + provider-agnostic
-`get_chat_model()` (OpenAI API spec).
 """
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
 
-from app.core.config import settings
+from app.clients.graph_client import GraphClient, extract_node_id
+from app.core.dependencies import get_graph_client
 from app.prompts.loader import load_prompt
-from app.services.graph_tools import traverse_project_graph
+from app.schemas.node_insights import NodeSummaryRequest
 from app.services.llm import get_chat_model
 
 router = APIRouter(prefix="/api/node-insights", tags=["AI Node Insights"])
@@ -27,15 +24,7 @@ PROMPT_FILE = {
 }
 
 
-class NodeSummaryRequest(BaseModel):
-    node_id: str
-    project_id: str
-    jwt_token: str
-    level: str = "intermediate"
-
-
 def _format_neighbors(payload: Any) -> str:
-    """Turn traverse result into a compact text block for the prompt."""
     if isinstance(payload, dict) and "error" in payload:
         return "(no neighbors available)"
     nodes = payload if isinstance(payload, list) else (payload.get("nodes") or [])
@@ -45,7 +34,7 @@ def _format_neighbors(payload: Any) -> str:
     for n in nodes[:30]:
         if not isinstance(n, dict):
             continue
-        nid = n.get("id")
+        nid = extract_node_id(n)
         label = n.get("label") or n.get("name") or nid
         ntype = n.get("type") or n.get("nodeType") or "?"
         lines.append(f"- {label} [{ntype}] (id={nid})")
@@ -53,12 +42,11 @@ def _format_neighbors(payload: Any) -> str:
 
 
 def _format_node(payload: Any) -> Dict[str, str]:
-    """Best-effort extraction of the central node from a traverse response."""
     if isinstance(payload, dict):
         if "node" in payload and isinstance(payload["node"], dict):
             n = payload["node"]
             return {
-                "name": str(n.get("label") or n.get("name") or n.get("id") or ""),
+                "name": str(n.get("label") or n.get("name") or extract_node_id(n) or ""),
                 "type": str(n.get("type") or n.get("nodeType") or ""),
                 "properties": str(n.get("properties") or ""),
             }
@@ -66,14 +54,17 @@ def _format_node(payload: Any) -> Dict[str, str]:
 
 
 @router.post("/summary")
-async def node_summary(request: NodeSummaryRequest):
+async def node_summary(
+    request: NodeSummaryRequest,
+    graph_client: GraphClient = Depends(get_graph_client),
+):
     if request.level not in VALID_LEVELS:
         raise HTTPException(
             status_code=400,
             detail=f"level must be one of {sorted(VALID_LEVELS)}",
         )
 
-    traversal = traverse_project_graph(
+    traversal = await graph_client.traverse_graph(
         project_id=request.project_id,
         jwt_token=request.jwt_token,
         start_node_id=request.node_id,
@@ -83,7 +74,6 @@ async def node_summary(request: NodeSummaryRequest):
         raise HTTPException(status_code=502, detail=traversal["error"])
 
     node_info = _format_node(traversal)
-    # Fallback: use node_id when label is missing
     if not node_info["name"]:
         node_info["name"] = request.node_id
 

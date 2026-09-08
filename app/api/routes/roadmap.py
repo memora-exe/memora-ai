@@ -3,31 +3,23 @@
 POST /api/roadmaps
 Body: { project_id, jwt_token, topic?, fileIds?, depth? }
 Returns: { topic, sourceFileIds, stages: [...] }
-
-At least one of `topic` / `fileIds` is required. fileIds is capped server-side
-at ROADMAP_MAX_FILE_IDS (Phase 4 hard pre-flight also runs in the BE).
 """
-from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-
+from app.clients.graph_client import GraphClient
 from app.core.config import settings
+from app.core.dependencies import get_graph_client
+from app.schemas.roadmap import RoadmapCreateReq
 from app.services.roadmap_builder import build_roadmap
 
 router = APIRouter(prefix="/api/roadmaps", tags=["Roadmaps"])
 
 
-class RoadmapCreateReq(BaseModel):
-    project_id: str
-    jwt_token: str
-    topic: Optional[str] = None
-    fileIds: Optional[List[str]] = Field(default=None)
-    depth: Optional[int] = None
-
-
 @router.post("")
-async def create_roadmap(body: RoadmapCreateReq):
+async def create_roadmap(
+    body: RoadmapCreateReq,
+    graph_client: GraphClient = Depends(get_graph_client),
+):
     has_topic = bool(body.topic and body.topic.strip())
     has_files = bool(body.fileIds)
 
@@ -52,6 +44,7 @@ async def create_roadmap(body: RoadmapCreateReq):
             file_ids=file_ids,
             depth=body.depth,
             jwt_token=body.jwt_token,
+            graph_client=graph_client,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

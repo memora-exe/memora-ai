@@ -175,7 +175,7 @@ try:
     import sys
     sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-    from app.services.agent_service import process_chat_message_stream
+    from app.services.chat.chat_service import process_chat_message_stream
     import asyncio
 
     async def run_in_process():
