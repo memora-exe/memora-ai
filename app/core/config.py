@@ -5,7 +5,9 @@ from dotenv import load_dotenv
 # Without this, `export OPENAI_EMBED_MODEL=text-embedding-3-small` set once
 # in a terminal persists across `.env` edits, and the user sees "embed fails
 # even though I changed .env" — silent override, very confusing.
-load_dotenv(override=True)
+from pathlib import Path
+env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+load_dotenv(dotenv_path=env_path, override=True)
 
 class Settings:
     PORT = int(os.getenv("PORT", 8000))
