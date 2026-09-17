@@ -106,6 +106,38 @@ class TestAgentChatTools(unittest.TestCase):
         self.assertEqual(citation["chunks"], citation["fileMatches"])
         self.assertEqual(citation["mutatedEntities"]["created"]["nodes"], ["node_1"])
 
+    def test_llm_highlight_tool_and_metadata(self):
+        import json
+        from app.services.chat.metadata_tracker import (
+            build_citation_metadata,
+            clear_metadata,
+            get_metadata,
+        )
+
+        clear_metadata(self.project_id, self.session_id)
+        hl_tool = self.tools_by_name["llm_highlight"]
+
+        items = [
+            {"id": "node-1", "color": "#00E676", "name": "Frontend"},
+            {"id": "node-2", "color": "#FF5722", "name": "Backend"},
+        ]
+        res = hl_tool(items_json=json.dumps(items), description="Components overview")
+        self.assertEqual(res["highlighted_count"], 2)
+        self.assertEqual(res["description"], "Components overview")
+
+        meta = get_metadata(self.project_id, self.session_id)
+        self.assertIn("highlights", meta)
+        self.assertEqual(len(meta["highlights"]), 2)
+        self.assertEqual(meta["highlights"][0]["color"], "#00E676")
+        self.assertEqual(meta["highlights"][1]["color"], "#FF5722")
+        self.assertEqual(meta["highlightDescription"], "Components overview")
+
+        citation = build_citation_metadata(meta)
+        self.assertIn("highlights", citation)
+        self.assertEqual(len(citation["highlights"]), 2)
+        self.assertEqual(citation["highlightDescription"], "Components overview")
+        clear_metadata(self.project_id, self.session_id)
+
     def test_tool_execution_flow(self):
         # Step 1: Save document
         file_id = "doc_test_1"

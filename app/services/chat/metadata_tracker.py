@@ -17,6 +17,19 @@ def get_metadata(project_id: str, session_id: str) -> dict:
     return _tool_metadata.get(f"{project_id}:{session_id}", {})
 
 
+def record_highlight(
+    project_id: str,
+    session_id: str,
+    items: list[dict],
+    description: str = "",
+) -> None:
+    """Record UI-only highlight items and description for a chat turn."""
+    entry = _tool_metadata.setdefault(f"{project_id}:{session_id}", {})
+    entry["highlights"] = items
+    if description:
+        entry["highlightDescription"] = description
+
+
 def clear_metadata(project_id: str, session_id: str) -> None:
     """Clear tracked metadata for a project/session."""
     _tool_metadata.pop(f"{project_id}:{session_id}", None)
@@ -76,4 +89,6 @@ def build_citation_metadata(tool_result: dict) -> dict:
         "highlighted": tool_result.get(_MUT_KEY, {}).get(
             "highlighted", {"nodes": [], "edges": []}
         ),
+        "highlights": tool_result.get("highlights", []),
+        "highlightDescription": tool_result.get("highlightDescription", ""),
     }

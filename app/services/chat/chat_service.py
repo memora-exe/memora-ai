@@ -27,6 +27,7 @@ from app.services.chat.metadata_tracker import (
     get_metadata,
 )
 from app.services.chat.stream_utils import aiter_with_timeout
+from app.services.chat.thinking_filter import ThinkingStreamFilter, strip_thinking
 
 logger = get_logger("ChatService")
 APP_NAME = "memora"
@@ -107,7 +108,9 @@ async def process_chat_message(
         clear_metadata(project_id, session_id)
 
         if final_response:
-            sr.append_message(session_id, "assistant", final_response)
+            final_response = strip_thinking(final_response)
+            if final_response:
+                sr.append_message(session_id, "assistant", final_response)
 
         logger.info(f"Chat finished. Response length: {len(final_response)}")
         return (
@@ -153,6 +156,7 @@ async def process_chat_message_stream(
 
         accumulated = ""
         event_count = 0
+        stream_filter = ThinkingStreamFilter()
         turn_started = time.monotonic()
         task_id = f"{session_id}:{int(turn_started * 1000)}"
         logger.info(f"[chat] turn {task_id} started (project={project_id})")
@@ -175,20 +179,25 @@ async def process_chat_message_stream(
                     if event.content and event.content.parts:
                         text_chunk = event.content.parts[0].text or ""
                         accumulated += text_chunk
-                        yield text_chunk
+                        for filtered_chunk in stream_filter.process_chunk(text_chunk):
+                            yield filtered_chunk
+
+                for remaining_chunk in stream_filter.flush():
+                    yield remaining_chunk
         except asyncio.TimeoutError:
             logger.error(
                 f"[chat] turn {task_id} deadline {settings.CHAT_TURN_DEADLINE_SEC}s exceeded"
             )
             # Persist partial response on deadline
-            if accumulated:
+            clean_accumulated = strip_thinking(accumulated)
+            if clean_accumulated:
                 try:
                     async with httpx.AsyncClient(timeout=10) as client:
                         r = await client.post(
                             f"{settings.NESTJS_API_URL}/projects/{project_id}/ai/sessions/{session_id}/persist",
                             headers={"Authorization": f"Bearer {jwt_token}"},
                             json={
-                                "content": accumulated,
+                                "content": clean_accumulated,
                                 "toolCalls": get_metadata(project_id, session_id),
                             },
                         )
@@ -197,7 +206,7 @@ async def process_chat_message_stream(
                     logger.warning(
                         f"[chat] turn {task_id} persist on deadline failed: {_persist_err}"
                     )
-            yield json.dumps({"error": f"turn deadline {settings.CHAT_TURN_DEADLINE_SEC}s exceeded"})
+            yield {"error": f"turn deadline {settings.CHAT_TURN_DEADLINE_SEC}s exceeded"}
             return
         finally:
             logger.info(
@@ -205,7 +214,8 @@ async def process_chat_message_stream(
                 f"events={event_count}"
             )
 
-        logger.info(f"Stream finished. Yielded {event_count} events. Response len: {len(accumulated)}")
+        clean_accumulated = strip_thinking(accumulated)
+        logger.info(f"Stream finished. Yielded {event_count} events. Clean response len: {len(clean_accumulated)}")
 
         tool_result = get_metadata(project_id, session_id)
         tool_calls = build_citation_metadata(tool_result)
@@ -214,9 +224,9 @@ async def process_chat_message_stream(
         # Yield metadata at end of stream
         yield {"metadata": tool_calls}
 
-        if accumulated:
-            sr.append_message(session_id, "assistant", accumulated)
+        if clean_accumulated:
+            sr.append_message(session_id, "assistant", clean_accumulated)
 
     except Exception as e:
         logger.error(f"Error in stream chat: {str(e)}", exc_info=True)
-        raise e
+        yield {"error": str(e)}

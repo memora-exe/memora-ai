@@ -49,6 +49,16 @@ class TestIngestionPipeline(unittest.IsolatedAsyncioTestCase):
         mock_extract_concepts.assert_called_once()
         mock_write_graph.assert_called_once_with(project_id, jwt_token, [{"name": "ConceptA"}])
 
+    def test_clean_extracted_text_sanitizes_binary(self):
+        from app.services.document_processor import clean_extracted_text
+        # Null bytes and control characters stripped
+        raw_with_nulls = "Hello\x00 World\x08!\x0b\x0c"
+        self.assertEqual(clean_extracted_text(raw_with_nulls), "Hello World!")
+
+        # Raw PDF header detected and avoided
+        raw_pdf = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>"
+        self.assertTrue(clean_extracted_text(raw_pdf).startswith("[Binary PDF stream"))
+
 
 if __name__ == "__main__":
     unittest.main()

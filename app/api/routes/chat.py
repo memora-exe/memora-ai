@@ -49,19 +49,34 @@ async def chat_stream(
     """SSE endpoint for streaming chat responses."""
 
     async def event_generator():
-        async for chunk in process_chat_message_stream(
-            message=request.message,
-            session_id=request.session_id,
-            project_id=request.project_id,
-            jwt_token=request.jwt_token,
-            graph_client=graph_client,
-            session_repo=session_repo,
-        ):
-            if isinstance(chunk, dict) and "metadata" in chunk:
-                yield {"event": "message", "data": json.dumps({"metadata": chunk["metadata"]})}
-            else:
-                yield {"event": "message", "data": json.dumps({"chunk": chunk})}
-        yield {"event": "done", "data": json.dumps({})}
+        try:
+            async for chunk in process_chat_message_stream(
+                message=request.message,
+                session_id=request.session_id,
+                project_id=request.project_id,
+                jwt_token=request.jwt_token,
+                graph_client=graph_client,
+                session_repo=session_repo,
+            ):
+                if isinstance(chunk, dict):
+                    if "error" in chunk:
+                        yield {"event": "error", "data": json.dumps({"error": chunk["error"]})}
+                    elif "metadata" in chunk:
+                        yield {"event": "message", "data": json.dumps({"metadata": chunk["metadata"]})}
+                    else:
+                        yield {"event": "message", "data": json.dumps(chunk)}
+                elif isinstance(chunk, str) and chunk.strip().startswith('{"error"'):
+                    try:
+                        err_obj = json.loads(chunk)
+                        yield {"event": "error", "data": json.dumps(err_obj)}
+                    except Exception:
+                        yield {"event": "message", "data": json.dumps({"chunk": chunk})}
+                else:
+                    yield {"event": "message", "data": json.dumps({"chunk": chunk})}
+            yield {"event": "done", "data": json.dumps({})}
+        except Exception as e:
+            logger.error(f"Error in stream event_generator: {str(e)}", exc_info=True)
+            yield {"event": "error", "data": json.dumps({"error": str(e)})}
 
     return EventSourceResponse(event_generator())
 

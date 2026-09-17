@@ -12,6 +12,7 @@ from typing import Optional
 import httpx
 
 from app.core.config import settings
+from app.services.document_processor import clean_extracted_text
 
 
 def _project_dir(project_id: str) -> Path:
@@ -71,9 +72,10 @@ def _clean_id(file_id: str) -> str:
 def save_document(project_id: str, file_id: str, markdown_content: str, metadata: Optional[dict] = None) -> None:
     clean_id = _clean_id(file_id)
     _safe_resolve(project_id, f'{clean_id}.md')
+    cleaned_content = clean_extracted_text(markdown_content)
     _request('POST', f'/internal/files/{clean_id}/parsed', json={
         'projectId': project_id,
-        'content': markdown_content,
+        'content': cleaned_content,
         'metadata': metadata or {},
     })
 
@@ -89,7 +91,9 @@ def read_document(project_id: str, file_id: str, offset: int = 1, limit: int = 1
         return {'error': f'File {file_id} not found'}
     if not data or data.get('_status') == 404 or 'error' in data:
         return {'error': f'File {file_id} not found'}
-    lines = str(data.get('content', '')).splitlines()
+    raw_content = str(data.get('content', ''))
+    cleaned = clean_extracted_text(raw_content)
+    lines = cleaned.splitlines()
     metadata = data.get('metadata') or {}
     return {
         'file_id': _clean_id(file_id),
@@ -110,7 +114,7 @@ def read_full_text(project_id: str, file_id: str) -> str:
         return ''
     if not data or data.get('_status') == 404 or 'error' in data:
         return ''
-    return str(data.get('content', ''))
+    return clean_extracted_text(str(data.get('content', '')))
 
 
 def list_documents(project_id: str, pattern: str = '*') -> list[dict]:

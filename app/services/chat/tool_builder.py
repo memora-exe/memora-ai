@@ -13,7 +13,8 @@ handle the sync/async bridge.
 from __future__ import annotations
 
 from app.clients.graph_client import GraphClient, extract_node_id
-from app.services.chat.metadata_tracker import record_mutation, set_metadata
+from app.services.chat.metadata_tracker import record_highlight, record_mutation, set_metadata
+from app.services.document_processor import clean_extracted_text
 from app.services.file_storage import grep_documents, list_documents, read_document
 
 
@@ -119,7 +120,10 @@ def build_graph_tools(
 
     def llm_read_file_content(file_id: str, offset: int = 1, limit: int = 100) -> dict:
         """Read a line range from a parsed markdown document."""
-        return read_document(project_id, file_id, offset, limit)
+        res = read_document(project_id, file_id, offset, limit)
+        if isinstance(res, dict) and "content" in res:
+            res["content"] = clean_extracted_text(str(res["content"]))
+        return res
 
 
 
@@ -130,13 +134,13 @@ def build_graph_tools(
         node_type_id: str = None,
         node_id: str = None,
         note: str = None,
-        data: dict = None,
+        data: str = None,
     ) -> dict:
         """Create a new knowledge graph node in current project.
 
         Use when the user asks to capture a new concept, entity, person, or topic
         in the project. Populate `note` with the substantive text (an excerpt,
-        summary, or analysis) and `data` with structured metadata such as
+        summary, or analysis) and `data` with structured JSON metadata such as
         {"source": fileId} when the node was derived from a file.
 
         Args:
@@ -146,7 +150,7 @@ def build_graph_tools(
             note: substantive text content for the node's note field (REQUIRED
                 when the user shared a file or asked for the node to contain
                 information; never leave empty in those cases).
-            data: optional structured payload (e.g. {"source": "<fileId>"}).
+            data: optional JSON string payload (e.g. '{"source": "<fileId>"}').
 
         Returns: created node with server-assigned id and properties.
         """
@@ -158,7 +162,14 @@ def build_graph_tools(
         if note:
             payload["note"] = note
         if data:
-            payload["data"] = data
+            if isinstance(data, str):
+                import json
+                try:
+                    payload["data"] = json.loads(data)
+                except Exception:
+                    payload["data"] = {"raw": data}
+            else:
+                payload["data"] = data
         result = _run(graph_client.create_node(project_id, jwt_token, payload))
         nid = None
         if isinstance(result, dict):
@@ -172,12 +183,12 @@ def build_graph_tools(
         node_name: str = None,
         node_type_id: str = None,
         note: str = None,
-        data: dict = None,
+        data: str = None,
     ) -> dict:
         """Update an existing knowledge graph node in current project.
 
         Omit any field to keep its current value. Pass `note` to overwrite the
-        text content; pass `data` to overwrite the structured payload.
+        text content; pass `data` (JSON string) to overwrite the structured payload.
         """
         payload = {"nodeId": node_id}
         if node_name is not None:
@@ -187,7 +198,14 @@ def build_graph_tools(
         if note is not None:
             payload["note"] = note
         if data is not None:
-            payload["data"] = data
+            if isinstance(data, str):
+                import json
+                try:
+                    payload["data"] = json.loads(data)
+                except Exception:
+                    payload["data"] = {"raw": data}
+            else:
+                payload["data"] = data
         result = _run(graph_client.update_node(project_id, jwt_token, payload))
         if isinstance(result, dict):
             _mut("updated", nodes=[node_id])
@@ -221,7 +239,7 @@ def build_graph_tools(
         source_node_id: str,
         target_node_id: str,
         edge_type_id: str = None,
-        properties: dict = None,
+        edge_properties: str = None,
         edge_id: str = None,
     ) -> dict:
         """Create a relationship between two existing nodes in the project.
@@ -235,14 +253,21 @@ def build_graph_tools(
             source_node_id: id of the source node (REQUIRED).
             target_node_id: id of the target node (REQUIRED).
             edge_type_id: optional edge type id (UUID).
-            properties: optional structured payload (free dict of metadata).
+            edge_properties: optional JSON string or metadata text for the edge.
             edge_id: optional client-provided UUID; server assigns one if omitted.
         """
         payload = {"sourceNodeId": source_node_id, "targetNodeId": target_node_id}
         if edge_type_id:
             payload["edgeTypeId"] = edge_type_id
-        if properties:
-            payload["properties"] = properties
+        if edge_properties:
+            if isinstance(edge_properties, str):
+                import json
+                try:
+                    payload["properties"] = json.loads(edge_properties)
+                except Exception:
+                    payload["properties"] = {"raw": edge_properties}
+            else:
+                payload["properties"] = edge_properties
         if edge_id:
             payload["edgeId"] = edge_id
         result = _run(graph_client.create_edge(project_id, jwt_token, payload))
@@ -258,7 +283,7 @@ def build_graph_tools(
         source_node_id: str = None,
         target_node_id: str = None,
         edge_type_id: str = None,
-        properties: dict = None,
+        edge_properties: str = None,
     ) -> dict:
         """Update an existing edge. Omit any field to keep its current value."""
         payload = {"edgeId": edge_id}
@@ -268,8 +293,15 @@ def build_graph_tools(
             payload["targetNodeId"] = target_node_id
         if edge_type_id is not None:
             payload["edgeTypeId"] = edge_type_id
-        if properties is not None:
-            payload["properties"] = properties
+        if edge_properties is not None:
+            if isinstance(edge_properties, str):
+                import json
+                try:
+                    payload["properties"] = json.loads(edge_properties)
+                except Exception:
+                    payload["properties"] = {"raw": edge_properties}
+            else:
+                payload["properties"] = edge_properties
         result = _run(graph_client.update_edge(project_id, jwt_token, payload))
         if isinstance(result, dict):
             _mut("updated", edges=[edge_id])
@@ -306,20 +338,104 @@ def build_graph_tools(
         """Read parsed text content of a single uploaded file by its id.
         Use after llm_list_files to retrieve a specific file's content.
         """
-        return _run(graph_client.read_file_content(file_id, jwt_token))
+        # First priority: clean parsed markdown from document storage
+        doc = read_document(project_id, file_id, offset=1, limit=300)
+        if doc and not doc.get("error") and doc.get("content"):
+            content = clean_extracted_text(str(doc["content"]))
+            if len(content) > 50000:
+                content = content[:50000] + "\n\n[...truncated to 50KB for context safety...]"
+            return {
+                "fileId": file_id,
+                "filename": doc.get("original_name", f"{file_id}.md"),
+                "content": content,
+                "total_lines": doc.get("total_lines", 0),
+            }
+        # Fallback to backend file content endpoint
+        res = _run(graph_client.read_file_content(file_id, jwt_token))
+        if isinstance(res, dict) and "content" in res:
+            content = clean_extracted_text(str(res["content"]))
+            if len(content) > 50000:
+                content = content[:50000] + "\n\n[...truncated to 50KB for context safety...]"
+            res["content"] = content
+        return res
 
-    def llm_highlight(nodes_or_edges: str = "nodes", ids: list = None) -> dict:
-        """UI-only highlight. Pass `nodes_or_edges` ∈ {nodes, edges} and `ids` list.
+    def llm_highlight(
+        items_json: str = None,
+        default_color: str = "#00E676",
+        description: str = "",
+        nodes_or_edges: str = "nodes",
+        ids: list = None,
+    ) -> dict:
+        """Highlight specific nodes on the graph with distinct, high-contrast colors.
 
-        Wraps the _record_mutation so ids show up in
-        meta.mutatedEntities.highlighted and propagate to FE searchHighlightIds.
+        Args:
+            items_json: JSON string representing a list of items to highlight:
+                '[{"id": "node-uuid", "color": "#00E676", "name": "Node Label"}]'
+                Colors must be vibrant 6-char hex (e.g. #00E676, #FF5722, #00E5FF, #FFD600, #FF1744).
+            default_color: Hex color applied to items if items_json doesn't specify one.
+            description: Short human-readable explanation of why these nodes are highlighted.
+            nodes_or_edges: "nodes" (default) or "edges" (for backward compatibility).
+            ids: Optional fallback list of IDs if items_json is not used.
         """
+        import json
+        import re
+
+        def _clean_color(c: str) -> str:
+            if not c or not isinstance(c, str):
+                return default_color or "#00E676"
+            c = c.strip()
+            if not c.startswith("#"):
+                c = f"#{c}"
+            if re.match(r"^#[0-9a-fA-F]{6}$", c):
+                return c.upper()
+            return default_color or "#00E676"
+
         kind = (nodes_or_edges or "nodes").lower()
-        clean_ids = [str(i) for i in (ids or []) if i]
-        if not clean_ids:
-            return {"error": "no ids provided", "_highlight": {"action": "highlighted", "kind": kind, "ids": []}}
-        _mut("highlighted", **{kind: clean_ids})
-        return {"highlighted_nodes": clean_ids} if kind == "nodes" else {"highlighted_edges": clean_ids}
+        items: list[dict] = []
+
+        if items_json and isinstance(items_json, str):
+            try:
+                parsed = json.loads(items_json)
+                if isinstance(parsed, list):
+                    for entry in parsed:
+                        if isinstance(entry, dict) and (entry.get("id") or entry.get("nodeId")):
+                            nid = str(entry.get("id") or entry.get("nodeId"))
+                            color = _clean_color(entry.get("color"))
+                            name = entry.get("name") or entry.get("label") or nid
+                            items.append({"id": nid, "color": color, "name": name, "kind": "node"})
+                        elif isinstance(entry, str) and entry.strip():
+                            nid = entry.strip()
+                            items.append({"id": nid, "color": _clean_color(default_color), "name": nid, "kind": "node"})
+            except Exception:
+                pass
+
+        if not items and ids:
+            clean_ids = [str(i) for i in ids if i]
+            for cid in clean_ids:
+                items.append({
+                    "id": cid,
+                    "color": _clean_color(default_color),
+                    "name": cid,
+                    "kind": "edge" if kind == "edges" else "node",
+                })
+
+        if not items:
+            return {"error": "no items or ids provided to highlight"}
+
+        # Legacy mutation tracker support
+        node_ids = [it["id"] for it in items if it.get("kind") == "node"]
+        edge_ids = [it["id"] for it in items if it.get("kind") == "edge"]
+        if node_ids:
+            _mut("highlighted", nodes=node_ids)
+        if edge_ids:
+            _mut("highlighted", edges=edge_ids)
+
+        record_highlight(project_id, session_id, items, description)
+        return {
+            "highlighted_count": len(items),
+            "description": description,
+            "items": items,
+        }
 
     return [
         llm_get_all_nodes,
