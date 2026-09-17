@@ -27,7 +27,6 @@ from app.services.chat.metadata_tracker import (
     get_metadata,
 )
 from app.services.chat.stream_utils import aiter_with_timeout
-from app.services.embedding_service import EmbeddingService, embedding_service
 
 logger = get_logger("ChatService")
 APP_NAME = "memora"
@@ -56,12 +55,10 @@ async def process_chat_message(
     jwt_token: str,
     *,
     graph_client: GraphClient = None,
-    embedding_svc: EmbeddingService = None,
     session_repo: SessionRepository = None,
 ) -> tuple[str, dict]:
     """Process a chat message using the ADK Agent (full response)."""
     gc = graph_client or _default_graph
-    es = embedding_svc or embedding_service
     sr = session_repo or session_repository
 
     logger.info(
@@ -75,7 +72,7 @@ async def process_chat_message(
         history = sr.get_messages(session_id) or []
         agent = create_agent(
             project_id, jwt_token, session_id, history,
-            graph_client=gc, embedding_service=es,
+            graph_client=gc,
         )
         runner = InMemoryRunner(agent=agent, app_name=APP_NAME)
         runner.auto_create_session = True
@@ -129,12 +126,10 @@ async def process_chat_message_stream(
     jwt_token: str,
     *,
     graph_client: GraphClient = None,
-    embedding_svc: EmbeddingService = None,
     session_repo: SessionRepository = None,
 ):
     """Process a chat message and yield chunks for SSE."""
     gc = graph_client or _default_graph
-    es = embedding_svc or embedding_service
     sr = session_repo or session_repository
 
     logger.info(
@@ -148,7 +143,7 @@ async def process_chat_message_stream(
         history = sr.get_messages(session_id) or []
         agent = create_agent(
             project_id, jwt_token, session_id, history,
-            graph_client=gc, embedding_service=es,
+            graph_client=gc,
         )
         runner = InMemoryRunner(agent=agent, app_name=APP_NAME)
         runner.auto_create_session = True

@@ -13,6 +13,7 @@ import time
 from app.clients.nestjs_client import NestJSClient
 from app.common.logger.logger import get_logger
 from app.core.config import settings
+from app.services.file_storage import delete_project_file
 
 logger = get_logger("CancelTracker")
 
@@ -73,6 +74,10 @@ def clear_active_cache(file_id: str) -> None:
 async def on_file_deleted(file_id: str, project_id: str) -> None:
     """Push-cancel: cancel any in-flight task for this file and invalidate cache."""
     clear_active_cache(file_id)
+    try:
+        delete_project_file(project_id, file_id)
+    except Exception as e:
+        logger.warning(f"[on_file_deleted] local file cleanup failed for {file_id}: {e}")
     task = task_registry.pop(file_id, None)
     if task and not task.done():
         task.cancel()

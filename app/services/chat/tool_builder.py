@@ -1,7 +1,7 @@
 """LLM tool closures for the chat agent — extracted from agent_service.py.
 
 Each closure captures (project_id, jwt_token, session_id) and delegates to
-GraphClient (async) or EmbeddingService. The ADK Agent calls these as
+GraphClient (async) or local file storage. The ADK Agent calls these as
 function tools — the docstrings ARE the tool descriptions the LLM sees.
 
 Note: google-adk FunctionTool can call sync functions. For async graph_client
@@ -13,9 +13,8 @@ handle the sync/async bridge.
 from __future__ import annotations
 
 from app.clients.graph_client import GraphClient, extract_node_id
-from app.repositories.vector_store import search as vector_search
 from app.services.chat.metadata_tracker import record_mutation, set_metadata
-from app.services.embedding_service import EmbeddingService
+from app.services.file_storage import grep_documents, list_documents, read_document
 
 
 def build_graph_tools(
@@ -24,7 +23,6 @@ def build_graph_tools(
     session_id: str,
     *,
     graph_client: GraphClient,
-    embedding_service: EmbeddingService,
 ) -> list:
     """Build the list of LLM-callable tools with injected context.
 
@@ -109,27 +107,21 @@ def build_graph_tools(
         """
         return _run(graph_client.traverse_graph(project_id, jwt_token, start_node_id, depth))
 
-    def llm_search_vector(query: str, k: int = 5) -> list:
-        """Search document chunks using semantic similarity (pgvector) in a project.
-        Use this tool when the user asks a question that requires scanning document contents, searching for details, or doing semantic lookup.
-        """
-        try:
-            query_embedding = embedding_service.get_embedding(query)
-            return vector_search(project_id, query_embedding, k=k)
-        except Exception as e:
-            return [{"error": f"Exception in semantic search: {str(e)}"}]
+    def llm_glob_files(pattern: str = "*") -> list:
+        """List parsed markdown documents available in this project."""
+        return list_documents(project_id, pattern)
 
-    def llm_search_hybrid(query: str, k: int = 5) -> dict:
-        """Hybrid search combining semantic search on document chunks and graph nodes.
-        Use this tool when the user asks a complex question that requires both concept relationships and document contents.
-        """
-        from app.services.search.hybrid_search import hybrid_search
-        result = hybrid_search(project_id, query, jwt_token, k,
-                               graph_client=graph_client,
-                               embedding_service=embedding_service)
-        # Track the tool result for citation metadata
-        set_metadata(project_id, session_id, result)
+    def llm_grep_search(query: str, path_pattern: str = "*.md", case_sensitive: bool = False) -> list:
+        """Search parsed document text, returning matching lines and context."""
+        result = grep_documents(project_id, query, path_pattern, case_sensitive)
+        set_metadata(project_id, session_id, {"fileMatches": result})
         return result
+
+    def llm_read_file_content(file_id: str, offset: int = 1, limit: int = 100) -> dict:
+        """Read a line range from a parsed markdown document."""
+        return read_document(project_id, file_id, offset, limit)
+
+
 
     # -- write tools -------------------------------------------------------
 
@@ -236,7 +228,7 @@ def build_graph_tools(
 
         Use when the user describes a relation between two concepts they already
         know (or that you just created). Source and target must be nodeIds of
-        nodes that already exist in this project; use llm_search_hybrid first if
+        nodes that already exist in this project; use llm_grep_search first if
         you are unsure.
 
         Args:
@@ -334,8 +326,9 @@ def build_graph_tools(
         llm_get_all_edges,
         llm_query_graph,
         llm_traverse_graph,
-        llm_search_vector,
-        llm_search_hybrid,
+        llm_glob_files,
+        llm_grep_search,
+        llm_read_file_content,
         llm_create_node,
         llm_update_node,
         llm_update_node_note,

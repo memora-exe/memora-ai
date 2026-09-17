@@ -16,7 +16,6 @@ import aio_pika
 from app.common.logger.logger import get_logger
 from app.core.config import settings
 from app.core.errors import FileCancelledError
-from app.services.embedding_service import EmbeddingCancelledError
 from app.services.ingestion.cancel_tracker import (
     on_file_deleted,
     sync_status,
@@ -92,7 +91,7 @@ async def handle_message(message: aio_pika.IncomingMessage, exchange) -> None:
             try:
                 await process_file_pipeline(file_id, key, project_id, jwt_token)
                 await publish_status(exchange, file_id, project_id, True)
-            except (FileCancelledError, EmbeddingCancelledError):
+            except FileCancelledError:
                 logger.info(f"[handle_message] skipping status publish for cancelled {file_id}")
                 cancelled = True
 

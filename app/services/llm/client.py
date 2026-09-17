@@ -11,14 +11,12 @@ provider, change `OPENAI_MODEL` / `OPENAI_BASE_URL` / `OPENAI_API_KEY`. No
 code change required.
 
 Usage:
-    from app.services.llm import get_chat_model, get_embedding_model
+    from app.services.llm import get_chat_model
 
     chat = get_chat_model(temperature=0.2)
-    embeddings = get_embedding_model()
 """
 from __future__ import annotations
 
-from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 
 from app.core.config import settings
@@ -48,24 +46,4 @@ def get_chat_model(temperature: float = 0.2) -> BaseChatModel:
         api_key=settings.OPENAI_API_KEY,
         base_url=settings.OPENAI_BASE_URL,
         temperature=temperature,
-    )
-
-
-def get_embedding_model() -> Embeddings:
-    """Return an embedding model that also speaks the OpenAI `/v1/embeddings`
-    wire format. Default uses `OPENAI_EMBED_BASE_URL` (falls back to chat
-    `OPENAI_BASE_URL`) and `OPENAI_EMBED_API_KEY` (falls back to chat key)."""
-    from langchain_openai import OpenAIEmbeddings
-
-    base_url = settings.OPENAI_EMBED_BASE_URL or settings.OPENAI_BASE_URL
-    api_key = settings.OPENAI_EMBED_API_KEY or settings.OPENAI_API_KEY
-    if not base_url or not api_key:
-        raise ValueError(
-            "Embeddings need an OpenAI-compatible base_url + api_key. "
-            "Set OPENAI_BASE_URL/OPENAI_API_KEY or the *_EMBED_* overrides."
-        )
-    return OpenAIEmbeddings(
-        model=settings.OPENAI_EMBED_MODEL,
-        api_key=api_key,
-        base_url=base_url,
     )

@@ -23,8 +23,8 @@ def clear_metadata(project_id: str, session_id: str) -> None:
 
 
 def set_metadata(project_id: str, session_id: str, data: dict) -> None:
-    """Replace the metadata for a project/session (used by hybrid search)."""
-    _tool_metadata[f"{project_id}:{session_id}"] = data
+    """Merge tool metadata without discarding mutation tracking."""
+    _tool_metadata.setdefault(f"{project_id}:{session_id}", {}).update(data)
 
 
 def record_mutation(
@@ -57,11 +57,16 @@ def record_mutation(
 
 
 def build_citation_metadata(tool_result: dict) -> dict:
-    """Build citation metadata from hybrid search tool result."""
+    """Build citation metadata from graph/file search tool result."""
+    file_matches = [
+        {"id": match["file_id"], "content": match["snippet"], "metadata": match}
+        for match in tool_result.get("fileMatches", [])
+    ]
     return {
         "citedNodes": tool_result.get("nodes", []),
         "citedEdges": tool_result.get("edges", []),
-        "chunks": tool_result.get("chunks", []),
+        "chunks": tool_result.get("chunks", []) or file_matches,
+        "fileMatches": file_matches,
         "reasoningPath": tool_result.get("reasoningPath", []),
         "mutatedEntities": tool_result.get(_MUT_KEY, {
             "created": {"nodes": [], "edges": []},

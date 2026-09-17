@@ -14,7 +14,6 @@ from app.clients.graph_client import GraphClient
 from app.core.config import settings
 from app.prompts.loader import render_prompt
 from app.services.chat.tool_builder import build_graph_tools
-from app.services.embedding_service import EmbeddingService
 
 INSTRUCTION_TEMPLATE = "chat_agent.md"
 
@@ -40,7 +39,6 @@ def create_agent(
     history_messages: list,
     *,
     graph_client: GraphClient,
-    embedding_service: EmbeddingService,
 ) -> Agent:
     """Create a new ADK Agent with tools injected with project context."""
     tools = build_graph_tools(
@@ -48,7 +46,6 @@ def create_agent(
         jwt_token,
         session_id,
         graph_client=graph_client,
-        embedding_service=embedding_service,
     )
     return Agent(
         name="memora_assistant",

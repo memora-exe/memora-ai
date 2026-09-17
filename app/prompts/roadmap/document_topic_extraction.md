@@ -4,7 +4,7 @@
 
 # Task
 You are reading one or more documents and extracting the topic plus 5–15
-concept noun phrases suitable for vector retrieval. Prefer canonical,
+concept names useful for text search, concept retrieval and keyword search. Prefer canonical,
 domain-specific concept names (e.g. "Linear Regression", "Transformer
 architecture") over generic words (e.g. "data", "model"). A concept should be
 short (1–3 words), capitalized/named, and useful as a search query.

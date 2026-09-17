@@ -1,13 +1,12 @@
 """Phase 4 — Learning Navigator (Roadmaps) builder.
 
 Pipeline:
-  1. (doc-aware) extract topic + concepts from already-ingested document chunks
+  1. (doc-aware) extract topic + concepts from locally stored documents
   2. union seeds with user-supplied topic tokens
-  3. pgvector top-K retrieval of chunks
-  4. match chunk metadata -> seed node ids
-  5. fetch all project nodes/edges, Kahn topological sort
-  6. partition sorted nodes into <= ROADMAP_MAX_STAGES
-  7. per-stage: ask LLM to generate title + 2-3 sentence description
+  3. match seed labels directly against graph nodes
+  4. fetch all project nodes/edges, Kahn topological sort
+  5. partition sorted nodes into <= ROADMAP_MAX_STAGES
+  6. per-stage: ask LLM to generate title + 2-3 sentence description
 """
 from __future__ import annotations
 
@@ -22,7 +21,6 @@ from app.prompts.loader import render_prompt
 from app.services.document_topic_extractor import extract_topic_from_files
 from app.services.llm import get_chat_model
 from app.services.llm.response_parser import parse_llm_json
-from app.services.search.hybrid_search import search_by_embedding
 
 logger = get_logger("RoadmapBuilder")
 
@@ -44,37 +42,6 @@ def _seed_concepts(topic: str, extracted_concepts: list[str]) -> list[str]:
             seen.add(c.lower())
             out.append(c)
     return out
-
-
-def _match_seed_nodes(chunks: list, project_nodes: list) -> list[dict]:
-    """Pick node objects whose id or label is referenced by any chunk."""
-    by_id = {extract_node_id(n): n for n in project_nodes if extract_node_id(n)}
-    label_to_id: dict[str, str] = {}
-    for n in project_nodes:
-        label = (n.get("label") or n.get("name") or "").strip()
-        nid = extract_node_id(n)
-        if label and nid:
-            label_to_id[label.lower()] = nid
-
-    seed_ids: list[str] = []
-    seen: set[str] = set()
-    for chunk in chunks or []:
-        if not isinstance(chunk, dict):
-            continue
-        metadata = chunk.get("metadata") or {}
-        if isinstance(metadata, dict):
-            nid = metadata.get("nodeId")
-            if nid in by_id and nid not in seen:
-                seen.add(nid)
-                seed_ids.append(nid)
-        content = (chunk.get("content") or "").lower()
-        if not content:
-            continue
-        for label, nid in label_to_id.items():
-            if len(label) > 3 and label in content and nid not in seen:
-                seen.add(nid)
-                seed_ids.append(nid)
-    return [by_id[nid] for nid in seed_ids if nid in by_id]
 
 
 def _kahn_topological_sort(nodes: list[dict], edges: list[dict]) -> list[str]:
@@ -168,22 +135,21 @@ async def build_roadmap(
 
     extracted: dict = {"topic": "", "concepts": []}
     if file_ids:
-        extracted = await extract_topic_from_files(file_ids)
+        extracted = await extract_topic_from_files(file_ids, project_id)
 
     headline_topic = (topic or extracted.get("topic") or "Learning Roadmap").strip()
     seed_concepts = _seed_concepts(topic or "", extracted.get("concepts", []))
     if not seed_concepts:
         seed_concepts = [headline_topic]
 
-    chunks = search_by_embedding(project_id, " ".join(seed_concepts), k=settings.ROADMAP_TOP_K_SEEDS)
-    if isinstance(chunks, dict) and "error" in chunks:
-        chunks = []
-
     nodes_resp = await gc.get_nodes(project_id, jwt_token)
     project_nodes = nodes_resp if isinstance(nodes_resp, list) else (nodes_resp.get("data", []) if isinstance(nodes_resp, dict) else [])
     if not isinstance(project_nodes, list):
         project_nodes = []
-    seed_nodes = _match_seed_nodes(chunks, project_nodes)
+    seed_nodes = [
+        node for node in project_nodes
+        if any(seed.lower() in (node.get("label") or node.get("name") or "").lower() for seed in seed_concepts)
+    ]
 
     edges_resp = await gc.get_edges(project_id, jwt_token)
     project_edges = edges_resp if isinstance(edges_resp, list) else (edges_resp.get("data", []) if isinstance(edges_resp, dict) else [])

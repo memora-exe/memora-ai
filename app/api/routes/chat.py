@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
 from app.clients.graph_client import GraphClient
-from app.core.dependencies import get_embedding_service, get_graph_client, get_session_repo
+from app.core.dependencies import get_graph_client, get_session_repo
 from app.prompts.loader import render_prompt
 from app.repositories.session_repository import SessionRepository
 from app.schemas.chat import (
@@ -17,7 +17,6 @@ from app.services.chat.chat_service import (
     process_chat_message,
     process_chat_message_stream,
 )
-from app.services.embedding_service import EmbeddingService
 from app.services.llm import get_chat_model
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
@@ -27,7 +26,6 @@ router = APIRouter(prefix="/api/chat", tags=["Chat"])
 async def chat(
     request: ChatRequest,
     graph_client: GraphClient = Depends(get_graph_client),
-    embedding_svc: EmbeddingService = Depends(get_embedding_service),
     session_repo: SessionRepository = Depends(get_session_repo),
 ):
     """Standard REST API endpoint for chat."""
@@ -37,7 +35,6 @@ async def chat(
         project_id=request.project_id,
         jwt_token=request.jwt_token,
         graph_client=graph_client,
-        embedding_svc=embedding_svc,
         session_repo=session_repo,
     )
     return ChatResponse(reply=reply, tool_calls=tool_calls)
@@ -47,7 +44,6 @@ async def chat(
 async def chat_stream(
     request: ChatRequest,
     graph_client: GraphClient = Depends(get_graph_client),
-    embedding_svc: EmbeddingService = Depends(get_embedding_service),
     session_repo: SessionRepository = Depends(get_session_repo),
 ):
     """SSE endpoint for streaming chat responses."""
@@ -59,7 +55,6 @@ async def chat_stream(
             project_id=request.project_id,
             jwt_token=request.jwt_token,
             graph_client=graph_client,
-            embedding_svc=embedding_svc,
             session_repo=session_repo,
         ):
             if isinstance(chunk, dict) and "metadata" in chunk:

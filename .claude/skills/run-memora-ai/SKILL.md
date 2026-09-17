@@ -89,7 +89,7 @@ Docs (Swagger UI): <http://localhost:8000/docs>
 
 ```bash
 .\start.ps1
-# → http://localhost:8000/docs in a browser
+# â†’ http://localhost:8000/docs in a browser
 ```
 
 ## Test
@@ -102,7 +102,7 @@ python test_api.py              # basic api sanity test
 ## Gotchas
 
 - **Requires `PYTHONPATH` set.** If you run uvicorn without `PYTHONPATH=.` or exporting it, uvicorn will crash trying to import `app.main` with `ModuleNotFoundError: No module named 'app'`.
-- **Relies on backing databases.** Even though it's a stateless microservice, `/api/search` and other Phase 2/3 endpoints will attempt connection to PostgreSQL (pgvector) and Redis (session cache). Make sure the backend Docker stack is up.
+- **Relies on backing databases.** Even though it's a stateless microservice, `/api/search` and other endpoints may connect to PostgreSQL and Redis (session cache). Make sure the backend Docker stack is up.
 - **Double slash in URL join.** The standard `urljoin` can sometimes produce `http://localhost:8000//health` depending on trailing slashes, but FastAPI handles double slashes gracefully.
 
 ## Troubleshooting

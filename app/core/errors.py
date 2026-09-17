@@ -17,14 +17,6 @@ class GraphAPIError(MemoraError):
         self.status_code = status_code
 
 
-class EmbeddingError(MemoraError):
-    """Embedding generation or storage failed."""
-
-
-class SearchError(MemoraError):
-    """Hybrid / vector search failed."""
-
-
 class FileCancelledError(MemoraError):
     """File was deleted or cancelled mid-processing."""
 

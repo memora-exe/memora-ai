@@ -10,7 +10,6 @@ from app.clients.graph_client import GraphClient
 from app.clients.nestjs_client import NestJSClient
 from app.core.config import settings
 from app.repositories.session_repository import SessionRepository
-from app.services.embedding_service import EmbeddingService
 
 
 @lru_cache
@@ -30,7 +29,3 @@ def get_session_repo() -> SessionRepository:
         port=settings.REDIS_PORT,
     )
 
-
-@lru_cache
-def get_embedding_service() -> EmbeddingService:
-    return EmbeddingService()

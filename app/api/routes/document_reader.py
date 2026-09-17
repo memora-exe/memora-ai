@@ -1,15 +1,10 @@
-"""Phase 3 — AI Document Reader (5 summary formats).
-
-POST /api/document-reader/summary
-Body: { file_id, project_id, jwt_token, type: short|detailed|executive|keyPoints|timeline }
-Returns: { summary }
-"""
+"""AI Document Reader using local file storage."""
 from fastapi import APIRouter, HTTPException
 
 from app.core.config import settings
 from app.prompts.loader import load_prompt
-from app.repositories.chunk_repository import fetch_chunks_by_file
 from app.schemas.document_reader import DocSummaryRequest
+from app.services.file_storage import read_full_text
 from app.services.llm import get_chat_model
 
 router = APIRouter(prefix="/api/document-reader", tags=["AI Document Reader"])
@@ -32,18 +27,13 @@ async def document_summary(request: DocSummaryRequest):
             detail=f"type must be one of {sorted(VALID_TYPES)}",
         )
 
-    try:
-        chunks = fetch_chunks_by_file(request.file_id)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"DB read failed: {e}")
-
-    if not chunks:
+    text = read_full_text(request.project_id, request.file_id)
+    if not text.strip():
         raise HTTPException(
             status_code=404,
-            detail="No chunks found for this file. Has it been processed?",
+            detail="No document content found for this file. Has it been processed?",
         )
 
-    text = "\n\n".join(chunks)
     cap = settings.DOC_SUMMARY_INPUT_CAP
     if len(text) > cap:
         text = text[:cap] + "\n\n[...truncated for summarization...]"

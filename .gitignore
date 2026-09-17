@@ -48,6 +48,10 @@ htmlcov/
 *.log
 logs/
 
+# Parsed document storage
+storage/projects/*
+!storage/projects/.gitkeep
+
 # Jupyter Notebook
 .ipynb_checkpoints/
 

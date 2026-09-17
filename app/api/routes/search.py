@@ -1,45 +1,25 @@
-"""Phase 3 — AI Graph Search.
-
-POST /api/search
-Body: { q, project_id, jwt_token }
-Returns: { nodes, edges, focalArea: { cx, cy, zoom } }
-"""
+"""File-based AI document search with graph node projection."""
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.clients.graph_client import GraphClient
-from app.core.config import settings
-from app.core.dependencies import get_embedding_service, get_graph_client
+from app.core.dependencies import get_graph_client
 from app.schemas.search import SearchRequest
-from app.services.embedding_service import EmbeddingService
+from app.services.file_storage import grep_documents
 from app.services.search.focal_area import compute_focal_area, project_to_search_shape
-from app.services.search.hybrid_search import hybrid_search
 
 router = APIRouter(prefix="/api", tags=["AI Search"])
 
 
 @router.post("/search")
-async def ai_search(
-    request: SearchRequest,
-    graph_client: GraphClient = Depends(get_graph_client),
-    embedding_svc: EmbeddingService = Depends(get_embedding_service),
-):
+async def ai_search(request: SearchRequest, graph_client: GraphClient = Depends(get_graph_client)):
     if not request.q or not request.q.strip():
         raise HTTPException(status_code=400, detail="q must not be empty")
-
-    result = hybrid_search(
-        project_id=request.project_id,
-        query=request.q,
-        jwt_token=request.jwt_token,
-        k=settings.SEARCH_TOP_K,
-        graph_client=graph_client,
-        embedding_service=embedding_svc,
-    )
-
-    if "error" in result and not result.get("nodes"):
-        raise HTTPException(status_code=502, detail=result["error"])
-
-    nodes = result.get("nodes") or []
-    slim = project_to_search_shape(nodes)
-    focal_area = compute_focal_area(nodes)
-
-    return {**slim, "focalArea": focal_area}
+    matches = grep_documents(request.project_id, request.q.strip())
+    nodes_resp = await graph_client.get_nodes(request.project_id, request.jwt_token)
+    nodes = nodes_resp if isinstance(nodes_resp, list) else (nodes_resp.get("data", []) if isinstance(nodes_resp, dict) else [])
+    needle = request.q.casefold()
+    matching_nodes = [n for n in nodes if isinstance(n, dict) and needle in str(n.get("label") or n.get("name") or "").casefold()]
+    result = project_to_search_shape(matching_nodes)
+    result["matches"] = matches
+    result["focalArea"] = compute_focal_area(matching_nodes)
+    return result

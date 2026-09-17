@@ -1,11 +1,9 @@
-"""All uploaded files are converted to Markdown via MarkItDown before any
-downstream AI step (chunking, embedding, concept extraction).
+"""Convert uploaded files to Markdown via MarkItDown before AI processing.
 
 The previous version had per-extension branches (pypdf / python-docx / text
 fallback). MarkItDown handles PDF, DOCX, PPTX, XLSX, HTML, images (with OCR),
-audio, and plain text in a single pipeline, which keeps downstream chunking
-language-agnostic and preserves document structure (headings, lists, tables,
-code blocks) for better embedding quality.
+audio, and plain text in a single pipeline, preserving document structure
+(headings, lists, tables, code blocks) for downstream concept extraction.
 
 `process_document()` keeps the same signature `(file_path: str) -> list[str]`
 so callers (rabbitmq_consumer) don't need to change.

@@ -14,7 +14,7 @@ Write-Host '>>> Cai dat dependencies tu requirements.txt...' -ForegroundColor Ye
 & .\venv\Scripts\python.exe -m pip install --disable-pip-version-check -r requirements.txt
 
 # Self-heal: probe import nhung module de loi (pydantic_core, psycopg2)
-$probe = & .\venv\Scripts\python.exe -c "import fastapi, psycopg2, pydantic" 2>&1
+$probe = & .\venv\Scripts\python.exe -c "import fastapi, pydantic" 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host '>>> Phat hien venv hong -> tao lai tu dau...' -ForegroundColor Red
     Remove-Item -Recurse -Force venv
