@@ -1,0 +1,132 @@
+"""Graph RAG Flashcard Synthesizer.
+
+Generates pedagogically sound flashcards (Q&A pairs) from graph nodes and their
+relationships (DEFINES, PREREQUISITE, RELATES_TO).
+"""
+from __future__ import annotations
+
+import json
+import logging
+from app.clients.graph_client import GraphClient, extract_node_id, extract_edge_endpoints
+
+logger = logging.getLogger(__name__)
+
+
+async def generate_flashcards_from_nodes(
+    project_id: str,
+    node_ids: list[str],
+    count: int,
+    jwt_token: str,
+    graph_client: GraphClient,
+) -> list[dict]:
+    """Generate structured flashcard items from specified node IDs."""
+    logger.info(
+        "Generating %d flashcards for project %s across %d nodes",
+        count,
+        project_id,
+        len(node_ids),
+    )
+
+    try:
+        all_nodes = await graph_client.get_nodes(project_id, jwt_token)
+    except Exception as exc:
+        logger.warning("Failed to fetch nodes for flashcard generation: %s", exc)
+        all_nodes = []
+
+    target_node_ids = set(node_ids)
+    selected_nodes = [
+        n for n in all_nodes if extract_node_id(n) in target_node_ids
+    ]
+
+    try:
+        all_edges = await graph_client.get_edges(project_id, jwt_token)
+    except Exception as exc:
+        logger.warning("Failed to fetch edges for flashcard generation: %s", exc)
+        all_edges = []
+
+    node_by_id = {extract_node_id(n): n for n in selected_nodes if extract_node_id(n)}
+    relation_pairs = []
+    for edge in all_edges:
+        source_id, target_id = extract_edge_endpoints(edge)
+        if source_id not in node_by_id or target_id not in node_by_id:
+            continue
+        relation = (
+            edge.get("edgeTypeId")
+            or (edge.get("properties") or {}).get("edgeTypeId")
+            or (edge.get("properties") or {}).get("type")
+            or "RELATES_TO"
+        )
+        relation_pairs.append((node_by_id[source_id], node_by_id[target_id], str(relation).upper()))
+
+    relation_cards = []
+    for source, target, relation in relation_pairs:
+        source_name = source.get("nodeName", "A")
+        target_name = target.get("nodeName", "B")
+        if relation == "PREREQUISITE":
+            front = f"Trước khi học '{target_name}', cần nắm khái niệm nào?"
+            back = f"'{source_name}' là khái niệm tiên quyết cho '{target_name}'."
+        elif relation in {"DEFINES", "IS_A"}:
+            front = f"'{source_name}' định nghĩa hoặc mô tả gì về '{target_name}'?"
+            back = f"Mối quan hệ {relation}: '{source_name}' liên kết với '{target_name}'."
+        else:
+            front = f"'{source_name}' liên hệ thế nào với '{target_name}'?"
+            back = f"'{source_name}' và '{target_name}' có quan hệ {relation}."
+        relation_cards.append({"front": front, "back": back, "nodeId": extract_node_id(source), "sourceRelation": relation})
+
+    cards: list[dict] = list(relation_cards[:count])
+
+    if len(cards) >= count:
+        return cards[:count]
+
+    # 2. Definitional cards for selected nodes not fully covered by relation cards
+    for node in selected_nodes:
+        if len(cards) >= count:
+            break
+        nid = extract_node_id(node)
+        name = node.get("nodeName") or "Concept"
+        note = (node.get("note") or "").strip()
+        data = node.get("data") or {}
+
+        # 1. Primary Definitional Card
+        if note:
+            front = f"Định nghĩa và vai trò cốt lõi của khái niệm '{name}' là gì?"
+            back = note
+        elif data:
+            summary = ", ".join(f"{k}: {v}" for k, v in data.items() if v)
+            front = f"Đặc điểm chính của '{name}' bao gồm những gì?"
+            back = summary or f"'{name}' là một khái niệm thành phần trong hệ thống tri thức."
+        else:
+            front = f"Giải thích khái niệm '{name}' và ứng dụng của nó?"
+            back = f"'{name}' là một khái niệm quan trọng trong hệ thống tri thức của đồ thị."
+
+        cards.append(
+            {
+                "front": front,
+                "back": back,
+                "nodeId": nid,
+                "sourceRelation": "DEFINES",
+            }
+        )
+
+        if len(cards) >= count:
+            break
+
+    # If still need more cards, generate contrast / recall cards
+    if len(cards) < count and len(selected_nodes) >= 2:
+        for i in range(len(selected_nodes) - 1):
+            n1 = selected_nodes[i]
+            n2 = selected_nodes[i + 1]
+            n1_name = n1.get("nodeName", "A")
+            n2_name = n2.get("nodeName", "B")
+            cards.append(
+                {
+                    "front": f"Mối liên hệ hoặc sự khác biệt chính giữa '{n1_name}' và '{n2_name}' là gì?",
+                    "back": f"'{n1_name}' và '{n2_name}' là hai khái niệm liên kết trong cùng miền tri thức. Hãy xem xét cách chúng tương tác qua các quan hệ tiên quyết hoặc bổ trợ.",
+                    "nodeId": extract_node_id(n1),
+                    "sourceRelation": "RELATES_TO",
+                }
+            )
+            if len(cards) >= count:
+                break
+
+    return cards[:count]

@@ -69,6 +69,16 @@ def record_mutation(
         bucket[action]["edges"].extend(e for e in edges if e)
 
 
+def record_path_highlight(
+    project_id: str,
+    session_id: str,
+    path_data: dict,
+) -> None:
+    """Record shortest path highlight for animated pulse and bridge node reasoning."""
+    entry = _tool_metadata.setdefault(f"{project_id}:{session_id}", {})
+    entry["pathHighlight"] = path_data
+
+
 def build_citation_metadata(tool_result: dict) -> dict:
     """Build citation metadata from graph/file search tool result."""
     file_matches = [
@@ -81,6 +91,7 @@ def build_citation_metadata(tool_result: dict) -> dict:
         "chunks": tool_result.get("chunks", []) or file_matches,
         "fileMatches": file_matches,
         "reasoningPath": tool_result.get("reasoningPath", []),
+        "pathHighlight": tool_result.get("pathHighlight"),
         "mutatedEntities": tool_result.get(_MUT_KEY, {
             "created": {"nodes": [], "edges": []},
             "updated": {"nodes": [], "edges": []},

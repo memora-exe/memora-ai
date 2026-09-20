@@ -17,7 +17,7 @@ except Exception:
 import requests
 
 BE = "http://localhost:3000"
-AI = "http://localhost:8600"
+AI = "http://localhost:3100"
 EMAIL = "admin@example.com"
 PASSWORD = "Admin@123"
 PROJECT_ID = "2e3ff753-3622-48fc-a6b7-0a14b93ab68e"

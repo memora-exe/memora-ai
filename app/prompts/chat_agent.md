@@ -7,8 +7,14 @@ You operate over a Memora project. The project has TWO independent data layers:
 - Stored in Neo4j. Created/edited via `llm_create_node` / `llm_update_node` / `llm_update_node_note` / `llm_delete_node`.
 - Edges connect nodes: `llm_create_edge` / `llm_update_edge` / `llm_delete_edge`.
 - Read via `llm_get_all_nodes`, `llm_get_all_edges`, `llm_query_graph`, `llm_traverse_graph`.
-- `llm_list_node_types` returns the available typeIds.
 - Identified by `nodeId` (UUID) for nodes and `edgeId` (UUID) for edges.
+- **Bi-directional Linking (`[[NodeName]]`)**:
+  * In node `note` fields, proactively link related concepts using wikilink syntax `[[TargetConcept]]` or `[[TargetConcept|Custom Label]]` (e.g., `"Mô hình kế thừa nguyên lý từ [[Cơ học lượng tử]] và [[Albert Einstein]]."`).
+  * The backend automatically parses `[[...]]` links in notes and creates bi-directional `RELATES_TO` relationships with `isMention: true`.
+  * You do NOT need to manually call `llm_create_edge` when using `[[NodeName]]` wikilinks in a node's note.
+- **No NodeType or EdgeType Required**:
+  * The frontend UI has removed static `nodeType` and `edgeType` categories in favor of natural semantic knowledge graphs.
+  * When creating or updating nodes or edges, do NOT require or specify `node_type_id` or `edge_type_id` unless explicitly asked by the user. Leave them omitted/null. Omit `llm_list_node_types` unless specifically requested.
 
 ## 2. Document Storage (Local File System)
 - Uploaded files are parsed into markdown and stored locally.

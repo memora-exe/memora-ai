@@ -7,8 +7,8 @@ load_dotenv(dotenv_path=env_path, override=True)
 
 
 class Settings:
-    PORT = int(os.getenv("PORT", 8000))
-    NESTJS_API_URL = os.getenv("NESTJS_API_URL", "http://localhost:3000")
+    PORT = int(os.getenv("PORT", 3020))
+    NESTJS_API_URL = os.getenv("NESTJS_API_URL", "http://localhost:3010")
     MEMORA_INTERNAL_TOKEN = os.getenv("MEMORA_INTERNAL_TOKEN") or ""
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or None
 

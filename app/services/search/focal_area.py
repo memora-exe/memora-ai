@@ -56,14 +56,17 @@ def compute_focal_area(nodes: List[Dict[str, Any]]) -> Dict[str, float]:
 
 def project_to_search_shape(nodes: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Slim heavy search nodes down to what the FE needs."""
-    slim_nodes = [
-        {
-            "nodeId": n.get("id"),
-            "nodeName": n.get("label") or n.get("name") or n.get("id"),
-            "nodeType": n.get("type") or n.get("nodeType"),
+    slim_nodes = []
+    for n in nodes:
+        if not isinstance(n, dict):
+            continue
+        nid = n.get("nodeId") or n.get("id") or n.get("elementId")
+        if not nid:
+            continue
+        name = n.get("nodeName") or n.get("label") or n.get("name") or nid
+        slim_nodes.append({
+            "nodeId": nid,
+            "nodeName": name,
             "similarityScore": n.get("similarity_score"),
-        }
-        for n in nodes
-        if isinstance(n, dict) and n.get("id")
-    ]
+        })
     return {"nodes": slim_nodes, "edges": []}

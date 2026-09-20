@@ -13,7 +13,12 @@ handle the sync/async bridge.
 from __future__ import annotations
 
 from app.clients.graph_client import GraphClient, extract_node_id
-from app.services.chat.metadata_tracker import record_highlight, record_mutation, set_metadata
+from app.services.chat.metadata_tracker import (
+    record_highlight,
+    record_mutation,
+    record_path_highlight,
+    set_metadata,
+)
 from app.services.document_processor import clean_extracted_text
 from app.services.file_storage import grep_documents, list_documents, read_document
 
@@ -79,11 +84,12 @@ def build_graph_tools(
 
     def llm_query_graph(node_type_ids: list = None, edge_type_ids: list = None) -> dict:
         """Query specific parts of the project graph using optional filters on node types or edge types.
-        Use this when the user wants to filter graph data by a specific category or type.
+        Note: The UI no longer requires nodeType or edgeType, and wikilink mention edges have edgeTypeId=null.
+        Prefer querying without filters or using llm_traverse_graph / llm_get_all_nodes.
 
         Args:
-            node_type_ids (list): Optional list of node type IDs to filter nodes by type.
-            edge_type_ids (list): Optional list of edge type IDs to filter edges by type.
+            node_type_ids (list): Optional legacy list of node type IDs to filter nodes by type.
+            edge_type_ids (list): Optional legacy list of edge type IDs to filter edges by type.
 
         Returns:
             dict: Filtered graph result containing matched nodes and edges.
@@ -437,11 +443,156 @@ def build_graph_tools(
             "items": items,
         }
 
+    def llm_find_path(source_node: str, target_node: str) -> dict:
+        """Find the shortest path and bridge concepts connecting two knowledge nodes.
+
+        Use this tool when the user asks how two concepts are connected, what links
+        concept A to concept B, or wants to explore the path/bridge between two ideas.
+
+        Args:
+            source_node: The name or UUID of the starting concept node.
+            target_node: The name or UUID of the target concept node.
+        """
+        if not source_node or not target_node:
+            return {"error": "Both source_node and target_node are required"}
+
+        res = _run(
+            graph_client.find_path(
+                project_id,
+                jwt_token,
+                source=source_node.strip(),
+                target=target_node.strip(),
+                max_depth=6,
+            )
+        )
+        if not isinstance(res, dict):
+            return {"error": "Failed to retrieve path"}
+
+        nodes = res.get("nodes", [])
+        edges = res.get("edges", [])
+        bridge_nodes = res.get("bridgeNodes", [])
+
+        if not nodes:
+            return {
+                "found": False,
+                "message": f"No path found between '{source_node}' and '{target_node}' within 6 hops.",
+                "source": source_node,
+                "target": target_node,
+            }
+
+        node_ids = [n.get("nodeId") for n in nodes if n.get("nodeId")]
+        edge_ids = [e.get("edgeId") for e in edges if e.get("edgeId")]
+
+        # Record into metadata tracker for SSE emission
+        path_data = {
+            "source": source_node,
+            "target": target_node,
+            "nodes": node_ids,
+            "nodeIds": node_ids,
+            "edges": edge_ids,
+            "bridgeNodes": [
+                {
+                    "nodeId": str(bn.get("nodeId") if isinstance(bn, dict) else bn),
+                    "nodeName": str((bn.get("nodeName") or bn.get("nodeId")) if isinstance(bn, dict) else bn),
+                }
+                for bn in bridge_nodes
+                if bn
+            ],
+        }
+        record_path_highlight(project_id, session_id, path_data)
+
+        # Build reasoning path
+        reasoning_steps = []
+        for i, edge in enumerate(edges):
+            src_id = edge.get("sourceNodeId")
+            tgt_id = edge.get("targetNodeId")
+            props = edge.get("properties")
+            is_mention = False
+            if isinstance(props, dict):
+                is_mention = bool(props.get("isMention"))
+            elif isinstance(props, str) and '"isMention":true' in props:
+                is_mention = True
+            relation_name = "RELATES_TO (wikilink mention)" if is_mention else (edge.get("edgeTypeId") or "RELATES_TO")
+            reasoning_steps.append(
+                {
+                    "step": i + 1,
+                    "source": src_id,
+                    "target": tgt_id,
+                    "relation": relation_name,
+                }
+            )
+
+        set_metadata(
+            project_id,
+            session_id,
+            {
+                "pathHighlight": path_data,
+                "reasoningPath": reasoning_steps,
+            },
+        )
+
+        return {
+            "found": True,
+            "path_length": len(edges),
+            "source_node": nodes[0].get("nodeName") if nodes else source_node,
+            "target_node": nodes[-1].get("nodeName") if nodes else target_node,
+            "bridge_concepts": [bn.get("nodeName") for bn in bridge_nodes],
+            "ordered_path": [n.get("nodeName") for n in nodes],
+            "details": [
+                {
+                    "name": n.get("nodeName"),
+                    "note": n.get("note") or "",
+                    "data": n.get("data") or {},
+                }
+                for n in nodes
+            ],
+        }
+
+    def llm_generate_flashcards(topic: str = "", count: int = 5) -> dict:
+        """Generate active-recall flashcards from graph concepts.
+
+        Args:
+            topic: Optional concept name or topic used to select graph nodes.
+            count: Number of cards to generate, from 1 to 20.
+        """
+        safe_count = max(1, min(20, int(count or 5)))
+        query = (topic or "").strip().lower()
+        nodes = _run(graph_client.get_nodes(project_id, jwt_token))
+        if not isinstance(nodes, list):
+            return {"error": "Failed to retrieve graph nodes"}
+
+        if query:
+            selected = [
+                node for node in nodes
+                if query in str(node.get("nodeName", "")).lower()
+                or query in str(node.get("note", "")).lower()
+            ]
+        else:
+            selected = nodes
+        node_ids = [extract_node_id(node) for node in selected if extract_node_id(node)]
+        if not node_ids:
+            return {"cards": [], "total": 0, "message": "No matching graph concepts found"}
+
+        from app.services.flashcard_generator import generate_flashcards_from_nodes
+
+        cards = _run(
+            generate_flashcards_from_nodes(
+                project_id=project_id,
+                node_ids=node_ids,
+                count=safe_count,
+                jwt_token=jwt_token,
+                graph_client=graph_client,
+            )
+        )
+        return {"cards": cards, "total": len(cards), "topic": topic or "all"}
+
     return [
         llm_get_all_nodes,
         llm_get_all_edges,
         llm_query_graph,
         llm_traverse_graph,
+        llm_find_path,
+        llm_generate_flashcards,
         llm_glob_files,
         llm_grep_search,
         llm_read_file_content,

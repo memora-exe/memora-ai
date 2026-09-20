@@ -18,7 +18,10 @@ async def ai_search(request: SearchRequest, graph_client: GraphClient = Depends(
     nodes_resp = await graph_client.get_nodes(request.project_id, request.jwt_token)
     nodes = nodes_resp if isinstance(nodes_resp, list) else (nodes_resp.get("data", []) if isinstance(nodes_resp, dict) else [])
     needle = request.q.casefold()
-    matching_nodes = [n for n in nodes if isinstance(n, dict) and needle in str(n.get("label") or n.get("name") or "").casefold()]
+    def _get_node_name(n: dict) -> str:
+        return str(n.get("nodeName") or n.get("label") or n.get("name") or "")
+
+    matching_nodes = [n for n in nodes if isinstance(n, dict) and needle in _get_node_name(n).casefold()]
     result = project_to_search_shape(matching_nodes)
     result["matches"] = matches
     result["focalArea"] = compute_focal_area(matching_nodes)

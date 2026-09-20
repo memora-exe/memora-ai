@@ -92,6 +92,17 @@ class GraphClient:
             params={"depth": depth},
         )
 
+    async def find_path(
+        self, project_id: str, jwt_token: str, source: str, target: str, max_depth: int = 6
+    ) -> dict:
+        if not source or not target:
+            return {"error": "source and target must be non-empty", "nodes": [], "edges": [], "bridgeNodes": []}
+        return await self._client.get(
+            f"/projects/{project_id}/graph/path",
+            jwt_token,
+            params={"source": source, "target": target, "maxDepth": max_depth},
+        )
+
     # ── Node types ────────────────────────────────────────────────────────
 
     async def get_node_types(self, project_id: str, jwt_token: str) -> list[dict]:
