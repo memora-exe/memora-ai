@@ -15,6 +15,10 @@ class GenerateFlashcardsRequest(BaseModel):
     node_ids: list[str] = Field(default_factory=list)
     count: int = Field(default=8, ge=1, le=20)
     jwt_token: str = Field(default="")
+    prompt: str | None = Field(
+        default=None,
+        description="Chỉ dẫn hoặc yêu cầu sư phạm tùy chỉnh từ người dùng",
+    )
 
 
 @router.post("/generate")
@@ -29,5 +33,6 @@ async def generate_flashcards(
         count=req.count,
         jwt_token=req.jwt_token,
         graph_client=graph_client,
+        prompt=req.prompt,
     )
     return {"cards": cards, "total": len(cards)}

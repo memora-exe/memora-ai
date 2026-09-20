@@ -22,7 +22,10 @@ from langchain_core.language_models import BaseChatModel
 from app.core.config import settings
 
 
-def get_chat_model(temperature: float = 0.2) -> BaseChatModel:
+def get_chat_model(
+    temperature: float | None = None,
+    reasoning_effort: str | None = None,
+) -> BaseChatModel:
     """Return a `ChatOpenAI` targeting whatever `OPENAI_BASE_URL` points at.
 
     A single `OPENAI_MODEL` is used across the whole app - no per-task overrides.
@@ -40,10 +43,22 @@ def get_chat_model(temperature: float = 0.2) -> BaseChatModel:
             "OPENAI_API_KEY is not set. Configure it in .env."
         )
 
+    temp = temperature if temperature is not None else settings.AI_TEMPERATURE
+    effort = reasoning_effort or settings.AI_REASONING_EFFORT
+
+    kwargs: dict = {
+        "model": settings.OPENAI_MODEL,
+        "api_key": settings.OPENAI_API_KEY,
+        "base_url": settings.OPENAI_BASE_URL,
+    }
+
+    model_lower = settings.OPENAI_MODEL.lower()
+    is_reasoning_model = any(m in model_lower for m in ["o1", "o3", "o4"])
+
+    if effort:
+        kwargs["model_kwargs"] = {"reasoning_effort": effort}
+    if not is_reasoning_model:
+        kwargs["temperature"] = temp
+
     # Convention: keep this dumb on purpose - the env vars are the strategy, not code.
-    return ChatOpenAI(
-        model=settings.OPENAI_MODEL,
-        api_key=settings.OPENAI_API_KEY,
-        base_url=settings.OPENAI_BASE_URL,
-        temperature=temperature,
-    )
+    return ChatOpenAI(**kwargs)

@@ -15,6 +15,8 @@ class Settings:
     OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL") or None
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or None
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    AI_REASONING_EFFORT = os.getenv("AI_REASONING_EFFORT") or None
+    AI_TEMPERATURE = float(os.getenv("AI_TEMPERATURE", "0.2"))
 
     STORAGE_BASE_DIR = os.getenv(
         "STORAGE_BASE_DIR",

@@ -47,12 +47,21 @@ def create_agent(
         session_id,
         graph_client=graph_client,
     )
+    model_kwargs: dict = {}
+    model_lower = settings.OPENAI_MODEL.lower()
+    is_reasoning_model = any(m in model_lower for m in ["o1", "o3", "o4"])
+    if not is_reasoning_model:
+        model_kwargs["temperature"] = settings.AI_TEMPERATURE
+    if settings.AI_REASONING_EFFORT:
+        model_kwargs["reasoning_effort"] = settings.AI_REASONING_EFFORT
+
     return Agent(
         name="memora_assistant",
         model=LiteLlm(
             model=f"openai/{settings.OPENAI_MODEL}",
             api_base=settings.OPENAI_BASE_URL,
             api_key=settings.OPENAI_API_KEY,
+            **model_kwargs,
         ),
         instruction=build_instruction(history_messages),
         tools=tools,
