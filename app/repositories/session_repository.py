@@ -16,11 +16,18 @@ class SessionRepository:
         port: int = None,
         ttl: int = 86400,
     ):
-        self.client = redis.Redis(
-            host=host or settings.REDIS_HOST,
-            port=port or settings.REDIS_PORT,
-            decode_responses=True,
-        )
+        if settings.REDIS_URL:
+            self.client = redis.from_url(
+                settings.REDIS_URL,
+                decode_responses=True,
+                ssl_cert_reqs=None,
+            )
+        else:
+            self.client = redis.Redis(
+                host=host or settings.REDIS_HOST,
+                port=port or settings.REDIS_PORT,
+                decode_responses=True,
+            )
         self.ttl = ttl  # 24 hours sliding TTL
 
     def _get_key(self, session_id: str) -> str:
