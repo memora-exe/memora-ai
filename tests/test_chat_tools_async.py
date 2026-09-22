@@ -19,6 +19,7 @@ ASYNC_TOOL_NAMES = {
     "llm_generate_flashcards",
     "llm_create_node",
     "llm_update_node",
+    "llm_rename_node",
     "llm_update_node_note",
     "llm_delete_node",
     "llm_create_edge",
@@ -38,7 +39,7 @@ SYNC_TOOL_NAMES = {
 
 
 def test_tool_function_types():
-    """Verify 16 graph tools are native coroutines and 4 local tools are sync functions."""
+    """Verify 17 graph tools are native coroutines and 4 local tools are sync functions."""
     mock_client = MagicMock(spec=GraphClient)
     tools_list = build_graph_tools(
         project_id="proj-1",
@@ -48,7 +49,7 @@ def test_tool_function_types():
     )
     tools = {t.__name__: t for t in tools_list}
 
-    assert len(tools) == 20
+    assert len(tools) == 21
     for name in ASYNC_TOOL_NAMES:
         assert name in tools, f"Missing async tool {name}"
         assert inspect.iscoroutinefunction(tools[name]), f"Tool {name} should be async def"
@@ -156,3 +157,158 @@ async def test_nestjs_client_lazy_reconnection():
     # Cleanup
     await client.close()
     assert client._http_client is None
+
+
+@pytest.mark.anyio
+async def test_llm_update_node_name_and_note():
+    """Verify llm_update_node updates both nodeName and note, and tracks mutation."""
+    mock_client = MagicMock(spec=GraphClient)
+    mock_client.update_node = AsyncMock(
+        return_value={"nodeId": "node-101", "nodeName": "New Name", "note": "New Note"}
+    )
+
+    clear_metadata("proj-upd", "sess-upd")
+    tools_list = build_graph_tools(
+        project_id="proj-upd",
+        jwt_token="mock-jwt",
+        session_id="sess-upd",
+        graph_client=mock_client,
+    )
+    tools = {t.__name__: t for t in tools_list}
+
+    res = await tools["llm_update_node"](node_id="node-101", node_name="New Name", note="New Note")
+    assert res["nodeId"] == "node-101"
+    assert res["nodeName"] == "New Name"
+    assert res["note"] == "New Note"
+
+    mock_client.update_node.assert_awaited_once_with(
+        "proj-upd",
+        "mock-jwt",
+        {"nodeId": "node-101", "nodeName": "New Name", "note": "New Note"},
+    )
+
+    meta = get_metadata("proj-upd", "sess-upd")
+    assert "node-101" in meta["mutatedEntities"]["updated"]["nodes"]
+    clear_metadata("proj-upd", "sess-upd")
+
+
+@pytest.mark.anyio
+async def test_llm_update_node_content_alias():
+    """Verify alias `content` correctly sets `payload['note']`."""
+    mock_client = MagicMock(spec=GraphClient)
+    mock_client.update_node = AsyncMock(
+        return_value={"nodeId": "node-101", "note": "Alias Note Content"}
+    )
+
+    clear_metadata("proj-alias", "sess-alias")
+    tools_list = build_graph_tools(
+        project_id="proj-alias",
+        jwt_token="mock-jwt",
+        session_id="sess-alias",
+        graph_client=mock_client,
+    )
+    tools = {t.__name__: t for t in tools_list}
+
+    res = await tools["llm_update_node"](node_id="node-101", content="Alias Note Content")
+    assert res["note"] == "Alias Note Content"
+
+    mock_client.update_node.assert_awaited_once_with(
+        "proj-alias",
+        "mock-jwt",
+        {"nodeId": "node-101", "note": "Alias Note Content"},
+    )
+    clear_metadata("proj-alias", "sess-alias")
+
+
+@pytest.mark.anyio
+async def test_llm_update_node_auto_resolve_by_name():
+    """Verify auto-resolution from nodeName to UUID when calling llm_update_node."""
+    mock_client = MagicMock(spec=GraphClient)
+    uuid_str = "550e8400-e29b-41d4-a716-446655440000"
+    mock_client.get_nodes = AsyncMock(
+        return_value=[{"nodeId": uuid_str, "nodeName": "Machine Learning"}]
+    )
+    mock_client.update_node = AsyncMock(
+        return_value={"nodeId": uuid_str, "nodeName": "AI"}
+    )
+
+    clear_metadata("proj-resolve", "sess-resolve")
+    tools_list = build_graph_tools(
+        project_id="proj-resolve",
+        jwt_token="mock-jwt",
+        session_id="sess-resolve",
+        graph_client=mock_client,
+    )
+    tools = {t.__name__: t for t in tools_list}
+
+    res = await tools["llm_update_node"](node_id="machine learning", node_name="AI")
+    assert res["nodeId"] == uuid_str
+
+    mock_client.update_node.assert_awaited_once_with(
+        "proj-resolve",
+        "mock-jwt",
+        {"nodeId": uuid_str, "nodeName": "AI"},
+    )
+
+    meta = get_metadata("proj-resolve", "sess-resolve")
+    assert uuid_str in meta["mutatedEntities"]["updated"]["nodes"]
+    clear_metadata("proj-resolve", "sess-resolve")
+
+
+@pytest.mark.anyio
+async def test_llm_rename_node_convenience():
+    """Verify llm_rename_node convenience tool calls llm_update_node with node_name."""
+    mock_client = MagicMock(spec=GraphClient)
+    uuid_str = "550e8400-e29b-41d4-a716-446655440000"
+    mock_client.update_node = AsyncMock(
+        return_value={"nodeId": uuid_str, "nodeName": "Deep Learning"}
+    )
+
+    clear_metadata("proj-rename", "sess-rename")
+    tools_list = build_graph_tools(
+        project_id="proj-rename",
+        jwt_token="mock-jwt",
+        session_id="sess-rename",
+        graph_client=mock_client,
+    )
+    tools = {t.__name__: t for t in tools_list}
+
+    res = await tools["llm_rename_node"](node_id=uuid_str, new_name="Deep Learning")
+    assert res["nodeId"] == uuid_str
+    assert res["nodeName"] == "Deep Learning"
+
+    mock_client.update_node.assert_awaited_once_with(
+        "proj-rename",
+        "mock-jwt",
+        {"nodeId": uuid_str, "nodeName": "Deep Learning"},
+    )
+    clear_metadata("proj-rename", "sess-rename")
+
+
+@pytest.mark.anyio
+async def test_llm_update_node_note_with_content():
+    """Verify llm_update_node_note accepts alias `content`."""
+    mock_client = MagicMock(spec=GraphClient)
+    uuid_str = "550e8400-e29b-41d4-a716-446655440000"
+    mock_client.update_node = AsyncMock(
+        return_value={"nodeId": uuid_str, "note": "Updated Content"}
+    )
+
+    clear_metadata("proj-note", "sess-note")
+    tools_list = build_graph_tools(
+        project_id="proj-note",
+        jwt_token="mock-jwt",
+        session_id="sess-note",
+        graph_client=mock_client,
+    )
+    tools = {t.__name__: t for t in tools_list}
+
+    res = await tools["llm_update_node_note"](node_id=uuid_str, content="Updated Content")
+    assert res["note"] == "Updated Content"
+
+    mock_client.update_node.assert_awaited_once_with(
+        "proj-note",
+        "mock-jwt",
+        {"nodeId": uuid_str, "note": "Updated Content"},
+    )
+    clear_metadata("proj-note", "sess-note")
