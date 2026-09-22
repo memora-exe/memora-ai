@@ -8,7 +8,12 @@ import json
 import sys
 import time
 
-API = "http://localhost:8000"
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+PORT = os.getenv("PORT", "3020")
+API = f"http://localhost:{PORT}"
 SESSION_ID = "422cd396-f00d-417e-84d0-623832435df1"
 PROJECT_ID = "2e3ff753-3622-48fc-a6b7-0a14b93ab68e"
 JWT_TOKEN = "test-jwt-token"

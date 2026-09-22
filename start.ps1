@@ -38,7 +38,7 @@ if (-not $env:PORT) {
             if ($line -match '^PORT=(\d+)') { $env:PORT = $Matches[1]; break }
         }
     }
-    if (-not $env:PORT) { $env:PORT = '8000' }
+    if (-not $env:PORT) { $env:PORT = '3020' }
 }
 Write-Host ">>> Chay FastAPI server tren port $env:PORT (Ctrl+C de dung)..." -ForegroundColor Green
 $env:PYTHONPATH = "$PWD"

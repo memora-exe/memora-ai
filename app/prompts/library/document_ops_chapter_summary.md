@@ -1,1 +1,0 @@
-Hãy tóm tắt phần/chương {{chapter}} của tài liệu này. Nêu bật các luận điểm chính, số liệu quan trọng (nếu có), và kết luận rút ra. Trình bày bằng tiếng Việt, dùng heading "Luận điểm chính", "Số liệu", "Kết luận".

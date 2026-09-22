@@ -15,7 +15,7 @@ except Exception:
     pass
 
 # Read port from .env
-PORT = 8000
+PORT = 3020
 for line in open(".env").read().splitlines():
     if line.startswith("PORT="):
         PORT = int(line.split("PORT=")[1].strip())

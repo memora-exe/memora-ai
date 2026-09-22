@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Kill any process listening on a port (default 3010).
+# Kill any process listening on a port (default 3020).
 # Usage: kill_port.sh [PORT]
 set -e
-PORT="${1:-3010}"
+PORT="${1:-3020}"
 
 echo "Looking for PIDs on port $PORT..."
 PIDS=$(netstat -ano | grep ":$PORT" | grep LISTENING | awk '{print $NF}' | sort -u)

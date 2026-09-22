@@ -15,7 +15,7 @@ except Exception:
     pass
 
 # Read port from .env
-PORT = 8600
+PORT = 3020
 for line in open(".env").read().splitlines():
     if line.startswith("PORT="):
         PORT = int(line.split("PORT=")[1].strip())
@@ -89,6 +89,7 @@ for line in open(".env").read().splitlines():
         break
 env["GOOGLE_API_KEY"] = api_key
 env["PYTHONUNBUFFERED"] = "1"
+env["PYTHONPATH"] = "."
 
 # Run in background — detached process and redirect output to uvicorn.log
 DETACHED_PROCESS = 0x00000008

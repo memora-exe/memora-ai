@@ -1,1 +1,0 @@
-Hãy phân tích sâu sắc khái niệm {{concept}}. Giải thích định nghĩa, nguồn gốc lịch sử, và các ứng dụng thực tế quan trọng nhất của nó. Đưa ra ví dụ minh họa cụ thể và liệt kê những hiểu lầm phổ biến mà người mới thường gặp phải. Trình bày bằng tiếng Việt, dễ hiểu, có cấu trúc rõ ràng.
