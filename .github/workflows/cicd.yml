@@ -94,8 +94,12 @@ jobs:
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin || true
             docker pull "$IMAGE"
 
-            docker stop memora-ai || true
-            docker rm memora-ai || true
+            # ponytail: clear port 3020 across containers/host before binding
+            docker rm -f memora-ai 2>/dev/null || true
+            docker ps -aq --filter "publish=3020" | xargs -r docker rm -f 2>/dev/null || true
+            fuser -k 3020/tcp 2>/dev/null || true
+            kill -9 $(lsof -t -i:3020) 2>/dev/null || true
+            sleep 1
 
             docker run -d \
               --name memora-ai \
