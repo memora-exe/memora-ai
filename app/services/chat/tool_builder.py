@@ -11,6 +11,8 @@ or sub-loop lifecycle issues.
 """
 from __future__ import annotations
 
+import re
+
 from app.clients.graph_client import GraphClient, extract_node_id
 from app.services.chat.metadata_tracker import (
     record_highlight,
@@ -36,6 +38,62 @@ def build_graph_tools(
     """
 
     # -- helpers captured by closures --------------------------------------
+
+    UUID_REGEX = re.compile(
+        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    )
+
+    async def _resolve_node_id(identifier: str) -> str:
+        """Resolve a node identifier (UUID or nodeName) to canonical node UUID."""
+        if not identifier or not isinstance(identifier, str):
+            return identifier
+        cleaned = identifier.strip()
+        if UUID_REGEX.match(cleaned):
+            return cleaned
+
+        try:
+            nodes = await graph_client.get_nodes(project_id, jwt_token)
+            if isinstance(nodes, list):
+                target = cleaned.lower()
+                # 1. Exact match on canonical extract_node_id (handles custom IDs in tests/DB)
+                for n in nodes:
+                    if isinstance(n, dict) and extract_node_id(n) == cleaned:
+                        return cleaned
+
+                # 2. Exact match on nodeName
+                for n in nodes:
+                    if isinstance(n, dict):
+                        name = str(n.get("nodeName") or n.get("name") or "").strip().lower()
+                        if name == target:
+                            nid = extract_node_id(n)
+                            if nid:
+                                return nid
+
+                # 3. Exact match on title or label
+                for n in nodes:
+                    if isinstance(n, dict):
+                        title = str(n.get("title") or n.get("label") or "").strip().lower()
+                        if title == target:
+                            nid = extract_node_id(n)
+                            if nid:
+                                return nid
+
+                # 4. Substring match
+                candidates = [
+                    n for n in nodes
+                    if isinstance(n, dict)
+                    and (target in str(n.get("nodeName") or "").strip().lower()
+                         or str(n.get("nodeName") or "").strip().lower() in target)
+                ]
+                if candidates:
+                    candidates.sort(key=lambda x: abs(len(str(x.get("nodeName", ""))) - len(target)))
+                    nid = extract_node_id(candidates[0])
+                    if nid:
+                        return nid
+        except Exception:
+            pass
+
+        return cleaned
 
     def _mut(action: str, *, nodes=(), edges=()):
         record_mutation(project_id, session_id, action, nodes=nodes, edges=edges)
@@ -141,12 +199,13 @@ def build_graph_tools(
         node_id: str = None,
         note: str = None,
         data: str = None,
+        content: str = None,
     ) -> dict:
         """Create a new knowledge graph node in current project.
 
         Use when the user asks to capture a new concept, entity, person, or topic
-        in the project. Populate `note` with the substantive text (an excerpt,
-        summary, or analysis) and `data` with structured JSON metadata such as
+        in the project. Populate `note` (or alias `content`) with the substantive text
+        (an excerpt, summary, or analysis) and `data` with structured JSON metadata such as
         {"source": fileId} when the node was derived from a file.
 
         Args:
@@ -157,6 +216,7 @@ def build_graph_tools(
                 when the user shared a file or asked for the node to contain
                 information; never leave empty in those cases).
             data: optional JSON string payload (e.g. '{"source": "<fileId>"}').
+            content: alias for `note`. Used if `note` is omitted.
 
         Returns: created node with server-assigned id and properties.
         """
@@ -166,8 +226,9 @@ def build_graph_tools(
                 payload["nodeTypeId"] = node_type_id
             if node_id:
                 payload["nodeId"] = node_id
-            if note:
-                payload["note"] = note
+            final_note = note if note is not None else content
+            if final_note:
+                payload["note"] = final_note
             if data:
                 if isinstance(data, str):
                     import json
@@ -193,20 +254,35 @@ def build_graph_tools(
         node_type_id: str = None,
         note: str = None,
         data: str = None,
+        content: str = None,
     ) -> dict:
         """Update an existing knowledge graph node in current project.
 
-        Omit any field to keep its current value. Pass `note` to overwrite the
-        text content; pass `data` (JSON string) to overwrite the structured payload.
+        Use this tool to update the name, note/content, or metadata of any node.
+        You can pass the node's UUID or its current nodeName as `node_id` (auto-resolved).
+
+        Args:
+            node_id: UUID of the node, or current node name (REQUIRED).
+            node_name: New display name for the node if renaming.
+            node_type_id: Optional node type id (leave omitted/null in normal use).
+            note: New substantive note text/content (alias: content). Overwrites existing note.
+                Use wikilinks [[TargetConcept]] in note to automatically link related concepts.
+            data: Optional JSON string payload with structured metadata.
+            content: Alias for `note`. Used if `note` is omitted.
+
+        Returns:
+            The updated node object with properties, or an error object.
         """
         try:
-            payload = {"nodeId": node_id}
+            resolved_id = await _resolve_node_id(node_id)
+            payload = {"nodeId": resolved_id}
             if node_name is not None:
                 payload["nodeName"] = node_name
             if node_type_id is not None:
                 payload["nodeTypeId"] = node_type_id
-            if note is not None:
-                payload["note"] = note
+            final_note = note if note is not None else content
+            if final_note is not None:
+                payload["note"] = final_note
             if data is not None:
                 if isinstance(data, str):
                     import json
@@ -217,19 +293,49 @@ def build_graph_tools(
                 else:
                     payload["data"] = data
             result = await graph_client.update_node(project_id, jwt_token, payload)
-            if isinstance(result, dict):
-                _mut("updated", nodes=[node_id])
+            if isinstance(result, dict) and not result.get("error"):
+                mut_nid = extract_node_id(result) or resolved_id
+                _mut("updated", nodes=[mut_nid])
             return result
         except Exception as e:
             return {"error": f"Failed to update node: {e}"}
 
-    async def llm_update_node_note(node_id: str, note: str) -> dict:
-        """Convenience wrapper to set only the `note` field of an existing node.
+    async def llm_rename_node(node_id: str, new_name: str) -> dict:
+        """Convenience wrapper to rename an existing knowledge graph node.
 
-        Use when the user asks to attach text to an existing concept (e.g. "ghi
-        chú cho node X là: ...").
+        Use when the user asks to rename or change the display name of any node
+        (e.g., 'đổi tên node X thành Y', 'rename node A to B').
+        Supports passing either the node's UUID or its current name as `node_id`.
+
+        Args:
+            node_id: Current node UUID or current node name (REQUIRED).
+            new_name: The new display name for the node (REQUIRED).
+
+        Returns:
+            The updated node object, or error details.
         """
-        return await llm_update_node(node_id=node_id, note=note)
+        return await llm_update_node(node_id=node_id, node_name=new_name)
+
+    async def llm_update_node_note(
+        node_id: str,
+        note: str = None,
+        content: str = None,
+    ) -> dict:
+        """Convenience wrapper to set or update only the note/content of an existing node.
+
+        Use when the user asks to attach or edit text/notes of an existing concept
+        (e.g. "ghi chú cho node X là: ...", "cập nhật nội dung node X thành: ...").
+        Supports passing either the node's UUID or its current name as `node_id`.
+
+        Args:
+            node_id: UUID of the node, or the current name of the node (REQUIRED).
+            note: The text content to set for the node.
+            content: Alias for note.
+
+        Returns:
+            The updated node object, or error details.
+        """
+        return await llm_update_node(node_id=node_id, note=note, content=content)
 
     async def llm_delete_node(node_id: str) -> dict:
         """Delete a knowledge graph node from the current project.
@@ -628,6 +734,7 @@ def build_graph_tools(
         llm_read_file_content,
         llm_create_node,
         llm_update_node,
+        llm_rename_node,
         llm_update_node_note,
         llm_delete_node,
         llm_create_edge,
