@@ -11,6 +11,7 @@ import json
 import time
 
 import httpx
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import InMemoryRunner
 from google.adk.sessions import InMemorySessionService, Session
 from google.genai import types
@@ -162,11 +163,13 @@ async def process_chat_message_stream(
         logger.info(f"[chat] turn {task_id} started (project={project_id})")
 
         async def _runner_iter():
+            run_config = RunConfig(streaming_mode=StreamingMode.SSE)
             async for event in aiter_with_timeout(
                 runner.run_async(
                     user_id="default",
                     session_id=session_id,
                     new_message=content,
+                    run_config=run_config,
                 ),
                 timeout=settings.CHAT_LLM_TIMEOUT_SEC,
             ):
@@ -176,11 +179,15 @@ async def process_chat_message_stream(
             async with asyncio.timeout(settings.CHAT_TURN_DEADLINE_SEC):
                 async for event in _runner_iter():
                     event_count += 1
+                    is_partial = getattr(event, "partial", False)
+                    is_final = event.is_final_response() if hasattr(event, "is_final_response") else False
+
                     if event.content and event.content.parts:
                         text_chunk = event.content.parts[0].text or ""
-                        accumulated += text_chunk
-                        for filtered_chunk in stream_filter.process_chunk(text_chunk):
-                            yield filtered_chunk
+                        if is_partial or (is_final and not accumulated):
+                            accumulated += text_chunk
+                            for filtered_chunk in stream_filter.process_chunk(text_chunk):
+                                yield filtered_chunk
 
                 for remaining_chunk in stream_filter.flush():
                     yield remaining_chunk
