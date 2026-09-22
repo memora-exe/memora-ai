@@ -4,10 +4,10 @@ Will be deleted in Phase 6.
 """
 import asyncio
 from app.clients.graph_client import GraphClient
-from app.clients.nestjs_client import NestJSClient
+from app.clients.nestjs_client import get_shared_nestjs_client
 from app.core.config import settings
 
-_gc = GraphClient(NestJSClient(settings.NESTJS_API_URL))
+_gc = GraphClient(get_shared_nestjs_client())
 
 
 def write_graph(project_id: str, jwt_token: str, graph_data: dict):

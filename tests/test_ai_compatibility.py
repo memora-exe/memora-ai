@@ -58,7 +58,8 @@ def test_search_route_node_name_fallback():
     assert result["nodes"][0]["nodeName"] == "Neural Networks"
 
 
-def test_graph_tools_mention_edge_and_mutation():
+@pytest.mark.anyio
+async def test_graph_tools_mention_edge_and_mutation():
     """Verify tool closures handle mention edges and record mutations."""
     project_id = "proj-test"
     session_id = "sess-test"
@@ -93,7 +94,7 @@ def test_graph_tools_mention_edge_and_mutation():
     tools = {t.__name__: t for t in tools_list}
 
     # 1. Test find_path recognizes mention edge
-    find_path_res = tools["llm_find_path"]("node-1", "node-2")
+    find_path_res = await tools["llm_find_path"]("node-1", "node-2")
     assert find_path_res["found"] is True
     meta = get_metadata(project_id, session_id)
     assert "reasoningPath" in meta
@@ -101,13 +102,13 @@ def test_graph_tools_mention_edge_and_mutation():
     assert meta["reasoningPath"][0]["relation"] == "RELATES_TO (wikilink mention)"
 
     # 2. Test create_node mutations
-    create_node_res = tools["llm_create_node"](node_name="Created Concept", note="Linked to [[Node 2]]")
+    create_node_res = await tools["llm_create_node"](node_name="Created Concept", note="Linked to [[Node 2]]")
     assert create_node_res["nodeId"] == "node-new-1"
     mut_meta = get_metadata(project_id, session_id)
     assert "node-new-1" in mut_meta["mutatedEntities"]["created"]["nodes"]
 
     # 3. Test create_edge mutations with edge_type_id=None
-    create_edge_res = tools["llm_create_edge"](source_node_id="node-1", target_node_id="node-2")
+    create_edge_res = await tools["llm_create_edge"](source_node_id="node-1", target_node_id="node-2")
     assert create_edge_res["edgeId"] == "edge-new-1"
     mut_meta = get_metadata(project_id, session_id)
     assert "edge-new-1" in mut_meta["mutatedEntities"]["created"]["edges"]

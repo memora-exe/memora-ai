@@ -119,6 +119,12 @@ class TestFileStorage(unittest.TestCase):
         self.assertEqual(res["limit"], 2)
         self.assertEqual(res["content"], "Line 2: Target keyword\nLine 3")
 
+        # Zero or invalid offset/limit must be clamped safely without raising ValueError
+        res_zero = read_document(project_id, file_id, offset=0, limit=0)
+        self.assertEqual(res_zero["offset"], 1)
+        self.assertEqual(res_zero["limit"], 100)
+        self.assertTrue(res_zero["content"].startswith("Line 1"))
+
         # Also works when passing .md extension
         res_ext = read_document(project_id, f"{file_id}.md", offset=1, limit=2)
         self.assertEqual(res_ext["file_id"], file_id)

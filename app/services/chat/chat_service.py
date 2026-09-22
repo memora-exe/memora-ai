@@ -17,7 +17,7 @@ from google.adk.sessions import InMemorySessionService, Session
 from google.genai import types
 
 from app.clients.graph_client import GraphClient
-from app.clients.nestjs_client import NestJSClient
+from app.clients.nestjs_client import get_shared_nestjs_client
 from app.common.logger.logger import get_logger
 from app.core.config import settings
 from app.repositories.session_repository import SessionRepository, session_repository
@@ -35,8 +35,8 @@ APP_NAME = "memora"
 _session_service = InMemorySessionService()
 
 # Default clients — will be injected via Depends() in Phase 6
-_default_nestjs = NestJSClient(settings.NESTJS_API_URL)
-_default_graph = GraphClient(_default_nestjs)
+def _get_default_graph() -> GraphClient:
+    return GraphClient(get_shared_nestjs_client())
 
 
 async def _get_or_create_session(session_id: str) -> Session:
@@ -60,7 +60,7 @@ async def process_chat_message(
     session_repo: SessionRepository = None,
 ) -> tuple[str, dict]:
     """Process a chat message using the ADK Agent (full response)."""
-    gc = graph_client or _default_graph
+    gc = graph_client or _get_default_graph()
     sr = session_repo or session_repository
 
     logger.info(
@@ -133,7 +133,7 @@ async def process_chat_message_stream(
     session_repo: SessionRepository = None,
 ):
     """Process a chat message and yield chunks for SSE."""
-    gc = graph_client or _default_graph
+    gc = graph_client or _get_default_graph()
     sr = session_repo or session_repository
 
     logger.info(

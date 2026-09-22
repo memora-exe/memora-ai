@@ -110,8 +110,19 @@ async def asave_document(project_id: str, file_id: str, markdown_content: str, m
 
 
 def read_document(project_id: str, file_id: str, offset: int = 1, limit: int = 100) -> dict:
-    if offset < 1 or limit < 1:
-        raise ValueError('offset must be >= 1 and limit must be >= 1')
+    try:
+        offset = int(offset)
+    except (TypeError, ValueError):
+        offset = 1
+    if offset < 1:
+        offset = 1
+
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 100
+    if limit < 1:
+        limit = 100
     clean_id = _clean_id(file_id)
     _safe_resolve(project_id, f'{clean_id}.md')
     try:

@@ -7,6 +7,7 @@ goes through `NestJSClient.request()`.
 from __future__ import annotations
 
 from typing import Optional
+import asyncio
 import httpx
 
 from app.common.logger.logger import get_logger
@@ -26,17 +27,52 @@ class NestJSClient:
     def __init__(self, base_url: str, timeout: float = 30.0):
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
-        limits = httpx.Limits(
+        self._limits = httpx.Limits(
             max_keepalive_connections=20,
             max_connections=50,
             keepalive_expiry=30.0,
         )
-        self._http_client = httpx.AsyncClient(limits=limits, timeout=self._timeout)
+        self._http_client: Optional[httpx.AsyncClient] = None
+        self._client_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def _get_http_client(self) -> httpx.AsyncClient:
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        client_loop = getattr(self, "_client_loop", None)
+        if (
+            not hasattr(self, "_http_client")
+            or self._http_client is None
+            or self._http_client.is_closed
+            or client_loop is None
+            or client_loop is not current_loop
+            or client_loop.is_closed()
+        ):
+            self._http_client = httpx.AsyncClient(
+                limits=self._limits, timeout=self._timeout
+            )
+            self._client_loop = current_loop
+        return self._http_client
+
+    @property
+    def http_client(self) -> httpx.AsyncClient:
+        return self._get_http_client()
 
     async def close(self) -> None:
         """Close connection pool gracefully."""
-        if hasattr(self, "_http_client") and not self._http_client.is_closed:
-            await self._http_client.aclose()
+        if (
+            hasattr(self, "_http_client")
+            and self._http_client is not None
+            and not self._http_client.is_closed
+        ):
+            try:
+                await self._http_client.aclose()
+            except Exception:
+                pass
+        self._http_client = None
+        self._client_loop = None
 
     # -- public helpers (thin wrappers) ------------------------------------
 
@@ -77,11 +113,21 @@ class NestJSClient:
             headers["Authorization"] = f"Bearer {jwt_token}"
 
         try:
-            response = await self._http_client.request(
+            response = await self._get_http_client().request(
                 method, url, headers=headers, timeout=timeout or self._timeout, **kwargs
             )
         except Exception as e:
-            raise GraphAPIError(f"{method} {path} failed: {e}") from e
+            if "closed" in str(e).lower():
+                self._http_client = None
+                self._client_loop = None
+                try:
+                    response = await self._get_http_client().request(
+                        method, url, headers=headers, timeout=timeout or self._timeout, **kwargs
+                    )
+                except Exception as retry_e:
+                    raise GraphAPIError(f"{method} {path} failed: {retry_e}") from retry_e
+            else:
+                raise GraphAPIError(f"{method} {path} failed: {e}") from e
 
         if response.status_code in ok_codes:
             if response.status_code == 204:
@@ -101,9 +147,17 @@ class NestJSClient:
         url = f"{self._base_url}{path}"
         headers = {"X-Internal-Token": internal_token}
         try:
-            response = await self._http_client.get(url, headers=headers, timeout=timeout)
+            response = await self._get_http_client().get(url, headers=headers, timeout=timeout)
         except Exception as e:
-            raise GraphAPIError(f"internal GET {path} failed: {e}") from e
+            if "closed" in str(e).lower():
+                self._http_client = None
+                self._client_loop = None
+                try:
+                    response = await self._get_http_client().get(url, headers=headers, timeout=timeout)
+                except Exception as retry_e:
+                    raise GraphAPIError(f"internal GET {path} failed: {retry_e}") from retry_e
+            else:
+                raise GraphAPIError(f"internal GET {path} failed: {e}") from e
         if response.status_code == 404:
             return {"_status": 404}
         return response.json()
@@ -116,9 +170,17 @@ class NestJSClient:
             "Content-Type": "application/json",
         }
         try:
-            response = await self._http_client.patch(url, headers=headers, json=json, timeout=timeout)
+            response = await self._get_http_client().patch(url, headers=headers, json=json, timeout=timeout)
         except Exception as e:
-            raise GraphAPIError(f"internal PATCH {path} failed: {e}") from e
+            if "closed" in str(e).lower():
+                self._http_client = None
+                self._client_loop = None
+                try:
+                    response = await self._get_http_client().patch(url, headers=headers, json=json, timeout=timeout)
+                except Exception as retry_e:
+                    raise GraphAPIError(f"internal PATCH {path} failed: {retry_e}") from retry_e
+            else:
+                raise GraphAPIError(f"internal PATCH {path} failed: {e}") from e
         return response.status_code
 
 
