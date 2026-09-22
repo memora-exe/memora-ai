@@ -229,4 +229,12 @@ async def process_chat_message_stream(
 
     except Exception as e:
         logger.error(f"Error in stream chat: {str(e)}", exc_info=True)
+        fallback_msg = (
+            "Xin lỗi, đã xảy ra lỗi kết nối với mô hình AI. Vui lòng thử lại sau."
+            if not accumulated
+            else ""
+        )
+        if fallback_msg:
+            yield fallback_msg
+            sr.append_message(session_id, "assistant", fallback_msg)
         yield {"error": str(e)}

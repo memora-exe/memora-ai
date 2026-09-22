@@ -79,6 +79,7 @@ async def chat_stream(
         except Exception as e:
             logger.error(f"Error in stream event_generator: {str(e)}", exc_info=True)
             yield {"event": "error", "data": json.dumps({"error": str(e)})}
+            yield {"event": "done", "data": json.dumps({})}
 
     return EventSourceResponse(event_generator())
 
