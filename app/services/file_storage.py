@@ -12,6 +12,7 @@ from typing import Optional
 import httpx
 
 from app.core.config import settings
+from app.clients.nestjs_client import get_shared_nestjs_client
 from app.services.document_processor import clean_extracted_text
 
 
@@ -84,6 +85,28 @@ def save_document(project_id: str, file_id: str, markdown_content: str, metadata
         'content': cleaned_content,
         'metadata': metadata or {},
     })
+
+
+async def asave_document(project_id: str, file_id: str, markdown_content: str, metadata: Optional[dict] = None) -> None:
+    clean_id = _clean_id(file_id)
+    _safe_resolve(project_id, f'{clean_id}.md')
+    cleaned_content = clean_extracted_text(markdown_content)
+    client = get_shared_nestjs_client()
+    url = f"{client._base_url}/internal/files/{clean_id}/parsed"
+    headers = _headers()
+    headers["Content-Type"] = "application/json"
+    res = await client._http_client.post(
+        url,
+        headers=headers,
+        json={
+            'projectId': project_id,
+            'content': cleaned_content,
+            'metadata': metadata or {},
+        },
+        timeout=60.0,
+    )
+    if res.status_code >= 400:
+        raise RuntimeError(f"Storage API POST /internal/files/{clean_id}/parsed returned {res.status_code}: {res.text[:300]}")
 
 
 def read_document(project_id: str, file_id: str, offset: int = 1, limit: int = 100) -> dict:

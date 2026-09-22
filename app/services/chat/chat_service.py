@@ -176,21 +176,30 @@ async def process_chat_message_stream(
                 yield event
 
         try:
-            async with asyncio.timeout(settings.CHAT_TURN_DEADLINE_SEC):
-                async for event in _runner_iter():
-                    event_count += 1
-                    is_partial = getattr(event, "partial", False)
-                    is_final = event.is_final_response() if hasattr(event, "is_final_response") else False
+            async with asyncio.timeout(settings.CHAT_TURN_DEADLINE_SEC) as deadline_scope:
+                try:
+                    async for event in _runner_iter():
+                        event_count += 1
+                        is_partial = getattr(event, "partial", False)
+                        is_final = event.is_final_response() if hasattr(event, "is_final_response") else False
 
-                    if event.content and event.content.parts:
-                        text_chunk = event.content.parts[0].text or ""
-                        if is_partial or (is_final and not accumulated):
-                            accumulated += text_chunk
-                            for filtered_chunk in stream_filter.process_chunk(text_chunk):
-                                yield filtered_chunk
+                        if event.content and event.content.parts:
+                            text_chunk = event.content.parts[0].text or ""
+                            if is_partial or (is_final and not accumulated):
+                                accumulated += text_chunk
+                                for filtered_chunk in stream_filter.process_chunk(text_chunk):
+                                    yield filtered_chunk
 
-                for remaining_chunk in stream_filter.flush():
-                    yield remaining_chunk
+                    for remaining_chunk in stream_filter.flush():
+                        yield remaining_chunk
+                except asyncio.TimeoutError:
+                    if deadline_scope.expired():
+                        raise
+                    logger.error(
+                        f"[chat] turn {task_id} LLM idle timeout {settings.CHAT_LLM_TIMEOUT_SEC}s exceeded"
+                    )
+                    yield {"error": f"LLM response timed out after {settings.CHAT_LLM_TIMEOUT_SEC}s"}
+                    return
         except asyncio.TimeoutError:
             logger.error(
                 f"[chat] turn {task_id} deadline {settings.CHAT_TURN_DEADLINE_SEC}s exceeded"

@@ -78,6 +78,11 @@ def _to_markdown(file_path: str) -> str:
     return cleaned_md
 
 
+def extract_markdown(file_path: str) -> str:
+    """Directly extract and sanitize Markdown text without chunking."""
+    return _to_markdown(file_path)
+
+
 def process_document(file_path: str) -> list[str]:
     markdown = _to_markdown(file_path)
     return _SPLITTER.split_text(markdown)

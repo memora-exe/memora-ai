@@ -9,6 +9,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.api import router as api_router
+from app.clients.nestjs_client import close_shared_nestjs_client
 from app.core.config import settings
 from app.services.ingestion.consumer import start_consumer
 
@@ -18,12 +19,13 @@ async def lifespan(app: FastAPI):
     # Startup: Start RabbitMQ consumer as a background task
     consumer_task = asyncio.create_task(start_consumer())
     yield
-    # Shutdown: cancel consumer background task
+    # Shutdown: cancel consumer background task and close connection pool
     consumer_task.cancel()
     try:
         await consumer_task
     except asyncio.CancelledError:
         pass
+    await close_shared_nestjs_client()
 
 
 app = FastAPI(

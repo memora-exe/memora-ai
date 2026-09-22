@@ -129,14 +129,65 @@ class GraphClient:
         if jwt_token:
             headers["Authorization"] = f"Bearer {jwt_token}"
         try:
-            async with __import__("httpx").AsyncClient(timeout=60.0) as http:
-                res = await http.get(url, headers=headers)
-                res.raise_for_status()
-                return res.content
+            res = await self._client._http_client.get(url, headers=headers, timeout=60.0)
+            res.raise_for_status()
+            return res.content
         except Exception as e:
             raise GraphAPIError(f"download {file_key} failed: {e}") from e
 
     # ── Batch graph write (used by ingestion pipeline) ────────────────────
+
+    async def batch_write_graph(self, project_id: str, jwt_token: str, graph_data: dict) -> dict:
+        """Write nodes and edges in a single batch request, fallback to individual if needed."""
+        nodes = graph_data.get("nodes", [])
+        edges = graph_data.get("edges", [])
+
+        nodes_payload = []
+        for node in nodes:
+            name = node.get("title")
+            if not name:
+                continue
+            nodes_payload.append({
+                "nodeName": name,
+                "data": {
+                    "description": node.get("description", ""),
+                    "keywords": node.get("keywords", []),
+                    "aliases": node.get("aliases", []),
+                    "confidence": node.get("confidence", 1.0),
+                },
+            })
+
+        edges_payload = []
+        for edge in edges:
+            source = edge.get("source")
+            target = edge.get("target")
+            if not source or not target:
+                continue
+            edges_payload.append({
+                "sourceNodeId": source,
+                "targetNodeId": target,
+                "properties": {
+                    "type": edge.get("type", "RELATED_TO"),
+                    "confidence": edge.get("confidence", 1.0),
+                },
+            })
+
+        if not nodes_payload and not edges_payload:
+            return {"createdNodes": 0, "createdEdges": 0, "nodeIdMap": {}}
+
+        try:
+            res = await self._client.post(
+                f"/projects/{project_id}/graph/batch",
+                jwt_token,
+                json={"nodes": nodes_payload, "edges": edges_payload},
+                timeout=60.0,
+            )
+            return res if isinstance(res, dict) else {}
+        except Exception as e:
+            from app.common.logger.logger import get_logger
+            get_logger("GraphClient").warning(f"batch_write_graph failed, falling back to sequential writes: {e}")
+            await self.write_graph(project_id, jwt_token, graph_data)
+            return {"createdNodes": len(nodes_payload), "createdEdges": len(edges_payload), "nodeIdMap": {}}
 
     async def write_graph(self, project_id: str, jwt_token: str, graph_data: dict) -> None:
         """Write nodes and edges from concept extraction. Replaces graph_writer.py."""

@@ -24,6 +24,14 @@ from app.services.ingestion.cancel_tracker import (
 from app.services.ingestion.pipeline import process_file_pipeline
 
 logger = get_logger("RabbitMQConsumer")
+_semaphore: asyncio.Semaphore | None = None
+
+
+def get_ingestion_semaphore() -> asyncio.Semaphore:
+    global _semaphore
+    if _semaphore is None:
+        _semaphore = asyncio.Semaphore(settings.INGESTION_CONCURRENCY)
+    return _semaphore
 
 
 async def publish_status(
@@ -72,39 +80,47 @@ async def publish_status(
 
 
 async def handle_message(message: aio_pika.IncomingMessage, exchange) -> None:
-    """Process one uploaded file message."""
-    async with message.process():
-        file_id = None
-        project_id = None
-        cancelled = False
-        try:
-            body = json.loads(message.body.decode())
-            data = body.get("data", {})
-            file_id = data.get("fileId")
-            key = data.get("key")
-            project_id = data.get("projectId")
-
-            if not file_id or not key or not project_id:
-                return
-
-            jwt_token = os.getenv("SYSTEM_JWT_TOKEN", "")
+    """Process one uploaded file message with semaphore gating and status tracking."""
+    semaphore = get_ingestion_semaphore()
+    async with semaphore:
+        async with message.process():
+            file_id = None
+            project_id = None
+            cancelled = False
             try:
-                await process_file_pipeline(file_id, key, project_id, jwt_token)
-                await publish_status(exchange, file_id, project_id, True)
-            except FileCancelledError:
-                logger.info(f"[handle_message] skipping status publish for cancelled {file_id}")
-                cancelled = True
+                body = json.loads(message.body.decode())
+                data = body.get("data", {})
+                file_id = data.get("fileId")
+                key = data.get("key")
+                project_id = data.get("projectId")
 
-        except asyncio.CancelledError:
-            logger.info(f"handle_message task cancelled for {file_id}")
-            raise
-        except Exception as e:
-            logger.error(f"Error processing file message: {e}", exc_info=True)
-            if file_id and project_id and not cancelled:
+                if not file_id or not key or not project_id:
+                    return
+
+                # Immediately notify BE that processing has started
                 try:
-                    await publish_status(exchange, file_id, project_id, False, str(e))
-                except Exception as pe:
-                    logger.error(f"Error publishing failure status: {pe}")
+                    await sync_status(file_id, project_id, "processing")
+                except Exception as status_err:
+                    logger.warning(f"Failed to update status to processing for {file_id}: {status_err}")
+
+                jwt_token = os.getenv("SYSTEM_JWT_TOKEN", "")
+                try:
+                    await process_file_pipeline(file_id, key, project_id, jwt_token)
+                    await publish_status(exchange, file_id, project_id, True)
+                except FileCancelledError:
+                    logger.info(f"[handle_message] skipping status publish for cancelled {file_id}")
+                    cancelled = True
+
+            except asyncio.CancelledError:
+                logger.info(f"handle_message task cancelled for {file_id}")
+                raise
+            except Exception as e:
+                logger.error(f"Error processing file message: {e}", exc_info=True)
+                if file_id and project_id and not cancelled:
+                    try:
+                        await publish_status(exchange, file_id, project_id, False, str(e))
+                    except Exception as pe:
+                        logger.error(f"Error publishing failure status: {pe}")
 
 
 def _extract_file_id(message_body: bytes) -> str | None:
@@ -116,9 +132,10 @@ def _extract_file_id(message_body: bytes) -> str | None:
 
 async def start_consumer() -> None:
     """Entry point — connects to RabbitMQ and starts consumption loops."""
-    await asyncio.sleep(5)
     connection = await aio_pika.connect_robust(settings.RABBITMQ_URL)
     channel = await connection.channel()
+    await channel.set_qos(prefetch_count=settings.INGESTION_CONCURRENCY)
+
     exchange = await channel.declare_exchange(
         "sk_repo_events", type="topic", durable=True
     )

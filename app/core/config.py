@@ -23,8 +23,12 @@ class Settings:
         str(Path(__file__).resolve().parents[2] / "storage"),
     )
 
-    CHAT_LLM_TIMEOUT_SEC = int(os.getenv("CHAT_LLM_TIMEOUT_SEC", "25"))
+    CHAT_LLM_TIMEOUT_SEC = int(os.getenv("CHAT_LLM_TIMEOUT_SEC", "60"))
     CHAT_TURN_DEADLINE_SEC = int(os.getenv("CHAT_TURN_DEADLINE_SEC", "180"))
+
+    INGESTION_CONCURRENCY = int(os.getenv("INGESTION_CONCURRENCY", "2"))
+    INGESTION_LLM_TIMEOUT_SEC = int(os.getenv("INGESTION_LLM_TIMEOUT_SEC", "45"))
+    INGESTION_TEXT_CHAR_CAP = int(os.getenv("INGESTION_TEXT_CHAR_CAP", "30000"))
 
     NODE_SUMMARY_MAX_TOKENS = int(os.getenv("NODE_SUMMARY_MAX_TOKENS", "1024"))
     DOC_SUMMARY_MAX_TOKENS = int(os.getenv("DOC_SUMMARY_MAX_TOKENS", "2048"))

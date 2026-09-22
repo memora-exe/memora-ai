@@ -6,9 +6,11 @@ goes through `NestJSClient.request()`.
 """
 from __future__ import annotations
 
+from typing import Optional
 import httpx
 
 from app.common.logger.logger import get_logger
+from app.core.config import settings
 from app.core.errors import GraphAPIError
 
 logger = get_logger("NestJSClient")
@@ -19,11 +21,22 @@ _DELETE_OK = {200, 204}
 
 
 class NestJSClient:
-    """Async HTTP client for NestJS backend."""
+    """Async HTTP client for NestJS backend with connection pooling."""
 
     def __init__(self, base_url: str, timeout: float = 30.0):
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        limits = httpx.Limits(
+            max_keepalive_connections=20,
+            max_connections=50,
+            keepalive_expiry=30.0,
+        )
+        self._http_client = httpx.AsyncClient(limits=limits, timeout=self._timeout)
+
+    async def close(self) -> None:
+        """Close connection pool gracefully."""
+        if hasattr(self, "_http_client") and not self._http_client.is_closed:
+            await self._http_client.aclose()
 
     # -- public helpers (thin wrappers) ------------------------------------
 
@@ -64,8 +77,9 @@ class NestJSClient:
             headers["Authorization"] = f"Bearer {jwt_token}"
 
         try:
-            async with httpx.AsyncClient(timeout=timeout or self._timeout) as client:
-                response = await client.request(method, url, headers=headers, **kwargs)
+            response = await self._http_client.request(
+                method, url, headers=headers, timeout=timeout or self._timeout, **kwargs
+            )
         except Exception as e:
             raise GraphAPIError(f"{method} {path} failed: {e}") from e
 
@@ -87,8 +101,7 @@ class NestJSClient:
         url = f"{self._base_url}{path}"
         headers = {"X-Internal-Token": internal_token}
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.get(url, headers=headers)
+            response = await self._http_client.get(url, headers=headers, timeout=timeout)
         except Exception as e:
             raise GraphAPIError(f"internal GET {path} failed: {e}") from e
         if response.status_code == 404:
@@ -103,8 +116,26 @@ class NestJSClient:
             "Content-Type": "application/json",
         }
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.patch(url, headers=headers, json=json)
+            response = await self._http_client.patch(url, headers=headers, json=json, timeout=timeout)
         except Exception as e:
             raise GraphAPIError(f"internal PATCH {path} failed: {e}") from e
         return response.status_code
+
+
+_shared_client: Optional[NestJSClient] = None
+
+
+def get_shared_nestjs_client() -> NestJSClient:
+    """Return persistent singleton client for the application."""
+    global _shared_client
+    if _shared_client is None:
+        _shared_client = NestJSClient(settings.NESTJS_API_URL)
+    return _shared_client
+
+
+async def close_shared_nestjs_client() -> None:
+    """Close the persistent client on shutdown."""
+    global _shared_client
+    if _shared_client is not None:
+        await _shared_client.close()
+        _shared_client = None
