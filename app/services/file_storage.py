@@ -62,7 +62,7 @@ def _headers() -> dict[str, str]:
 
 def _request(method: str, path: str, **kwargs):
     url = f"{settings.NESTJS_API_URL.rstrip('/')}{path}"
-    with httpx.Client(timeout=kwargs.pop('timeout', 15.0)) as client:
+    with httpx.Client(timeout=kwargs.pop('timeout', 60.0)) as client:
         response = client.request(method, url, headers=_headers(), **kwargs)
     if response.status_code == 404:
         return {'_status': 404, 'error': 'Not found'}

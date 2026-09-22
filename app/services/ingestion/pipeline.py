@@ -28,18 +28,24 @@ async def process_file_pipeline(file_id: str, key: str, project_id: str, jwt_tok
             tmp.write(file_bytes)
             tmp_path = tmp.name
 
-        chunks = process_document(tmp_path)
+        chunks = await asyncio.to_thread(process_document, tmp_path)
         if not chunks:
             raise ValueError("No text content could be extracted from document.")
         full_text = "\n".join(chunks)
-        save_document(project_id, file_id, full_text, {
-            "originalName": os.path.basename(key),
-            "projectId": project_id,
-        })
+        await asyncio.to_thread(
+            save_document,
+            project_id,
+            file_id,
+            full_text,
+            {
+                "originalName": os.path.basename(key),
+                "projectId": project_id,
+            },
+        )
 
         if not await is_file_active(file_id, project_id):
             raise FileCancelledError(file_id)
-        concepts = extract_concepts(full_text[:50000])
+        concepts = await asyncio.to_thread(extract_concepts, full_text[:50000])
         if not await is_file_active(file_id, project_id):
             raise FileCancelledError(file_id)
         await _graph_client.write_graph(project_id, jwt_token, concepts)

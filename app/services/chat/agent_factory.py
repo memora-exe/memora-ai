@@ -55,7 +55,7 @@ def create_agent(
     if settings.AI_REASONING_EFFORT:
         model_kwargs["reasoning_effort"] = settings.AI_REASONING_EFFORT
     model_kwargs["timeout"] = settings.CHAT_LLM_TIMEOUT_SEC
-    model_kwargs["num_retries"] = 1
+    model_kwargs["num_retries"] = 2
 
     return Agent(
         name="memora_assistant",
