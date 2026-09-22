@@ -17,7 +17,13 @@ from app.services.document_processor import clean_extracted_text
 
 def _project_dir(project_id: str) -> Path:
     """Compatibility validation; AI never creates a local storage directory."""
-    if not project_id or Path(project_id).name != project_id or project_id in {'.', '..'}:
+    if (
+        not project_id
+        or '/' in project_id
+        or '\\' in project_id
+        or Path(project_id).name != project_id
+        or project_id in {'.', '..'}
+    ):
         raise ValueError(f"Invalid project id: {project_id}")
     return Path(settings.STORAGE_BASE_DIR).resolve() / 'projects' / project_id
 
