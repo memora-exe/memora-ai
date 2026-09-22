@@ -21,8 +21,8 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
@@ -91,7 +91,7 @@ jobs:
             ${{ secrets.ENV_FILE }}
             EOF
 
-            echo "${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin || true
             docker pull "$IMAGE"
 
             docker stop memora-ai || true
@@ -103,4 +103,3 @@ jobs:
               -p 3020:3020 \
               --env-file .env \
               "$IMAGE"
-
