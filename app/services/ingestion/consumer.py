@@ -132,6 +132,11 @@ def _extract_file_id(message_body: bytes) -> str | None:
 
 async def start_consumer() -> None:
     """Entry point — connects to RabbitMQ and starts consumption loops."""
+    if not settings.RABBITMQ_ENABLED:
+        logger.info("RabbitMQ is disabled (RABBITMQ_ENABLED=false). Skipping consumer.")
+        return
+
+    await asyncio.sleep(5)
     connection = await aio_pika.connect_robust(settings.RABBITMQ_URL)
     channel = await connection.channel()
     await channel.set_qos(prefetch_count=settings.INGESTION_CONCURRENCY)

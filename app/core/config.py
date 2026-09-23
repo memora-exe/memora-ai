@@ -49,8 +49,14 @@ class Settings:
     DB_PASSWORD = os.getenv("DB_REPO_PASSWORD", "postgres")
     DB_NAME = os.getenv("DB_REPO_NAME", "repo")
 
-    RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5673/")
+    RABBITMQ_ENABLED = (
+        os.getenv("RABBITMQ_ENABLED", "false").lower() in ("true", "1", "yes")
+    )
+    RABBITMQ_URL = os.getenv("CLOUDAMQP_URL") or os.getenv(
+        "RABBITMQ_URL", "amqp://guest:guest@localhost:5673/"
+    )
 
+    REDIS_URL = os.getenv("REDIS_URL") or None
     REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT = int(os.getenv("REDIS_PORT", 6380))
 

@@ -71,7 +71,6 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      # ponytail: docker run with env-file; upgrade to docker-compose if managing shared networks
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -79,32 +78,17 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          command_timeout: 30m
           script: |
             set -e
-            APP_DIR="${{ secrets.VPS_AI_DIR || '/opt/memora-ai' }}"
-            IMAGE="${{ needs.build-and-push.outputs.image }}:latest"
+            cd /opt/memora
 
-            mkdir -p "$APP_DIR"
-            cd "$APP_DIR"
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            cat << 'EOF' > .env
-            ${{ secrets.ENV_FILE }}
-            EOF
+            # Pull latest AI image from GHCR
+            docker compose pull memora_ai
 
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin || true
-            docker pull "$IMAGE"
+            # Recreate AI container cleanly within Docker Compose network
+            docker compose up -d --no-deps memora_ai
 
-            # ponytail: clear port 3020 across containers/host before binding
-            docker rm -f memora-ai 2>/dev/null || true
-            docker ps -aq --filter "publish=3020" | xargs -r docker rm -f 2>/dev/null || true
-            fuser -k 3020/tcp 2>/dev/null || true
-            kill -9 $(lsof -t -i:3020) 2>/dev/null || true
-            sleep 1
-
-            docker run -d \
-              --name memora-ai \
-              --restart unless-stopped \
-              -p 3020:3020 \
-              --env-file .env \
-              "$IMAGE"
+            # Prune old images to prevent disk space exhaustion
+            docker image prune -af --filter "until=24h" || true
