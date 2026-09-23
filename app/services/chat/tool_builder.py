@@ -722,6 +722,147 @@ def build_graph_tools(
         except Exception as e:
             return {"error": f"Failed to generate flashcards: {e}"}
 
+
+    async def _resolve_cluster_id(identifier: str) -> str:
+        """Resolve cluster identifier (clusterId or cluster name) to canonical clusterId."""
+        if not identifier or not isinstance(identifier, str):
+            return identifier
+        cleaned = identifier.strip()
+        try:
+            res = await graph_client.get_clusters(project_id, jwt_token)
+            clusters = res.get('clusters', []) if isinstance(res, dict) else (res if isinstance(res, list) else [])
+            target = cleaned.lower()
+            # 1. Exact match on clusterId
+            for c in clusters:
+                if isinstance(c, dict) and str(c.get('clusterId', '')).strip() == cleaned:
+                    return cleaned
+            # 2. Exact match on name
+            for c in clusters:
+                if isinstance(c, dict) and str(c.get('name', '')).strip().lower() == target:
+                    cid = c.get('clusterId')
+                    if cid:
+                        return cid
+            # 3. Substring match on name
+            candidates = [
+                c for c in clusters
+                if isinstance(c, dict) and (target in str(c.get('name', '')).strip().lower()
+                                            or str(c.get('name', '')).strip().lower() in target)
+            ]
+            if candidates:
+                candidates.sort(key=lambda x: abs(len(str(x.get('name', ''))) - len(target)))
+                cid = candidates[0].get('clusterId')
+                if cid:
+                    return cid
+        except Exception:
+            pass
+        return cleaned
+
+    # -- cluster tools -----------------------------------------------------
+
+    async def llm_get_clusters() -> dict:
+        """Retrieve all semantic clusters (knowledge communities) in current project.
+
+        Use this tool when user asks about knowledge clusters, groups of related concepts,
+        or communities in the graph.
+
+        Returns:
+            dict: List of clusters with their clusterId, name, color, and member nodeIds.
+        """
+        try:
+            return await graph_client.get_clusters(project_id, jwt_token)
+        except Exception as e:
+            return {'error': f'Failed to get clusters: {e}'}
+
+    async def llm_create_cluster(
+        name: str,
+        node_ids: list[str] = None,
+        color: str = None,
+    ) -> dict:
+        """Create a new knowledge cluster and optionally add initial nodes to it.
+
+        Args:
+            name: Human-readable name for the cluster (e.g. 'He thong phan tan', 'Quan ly bo nho').
+            node_ids: Optional list of node names or UUIDs to assign to this cluster.
+            color: Optional hex color code for the cluster (e.g. '#EC4899', '#3B82F6').
+
+        Returns:
+            dict: The created cluster object with clusterId, name, color, and member nodeIds.
+        """
+        if not name or not name.strip():
+            return {'error': 'Cluster name is required'}
+
+        resolved_nodes: list[str] = []
+        if node_ids and isinstance(node_ids, list):
+            for n in node_ids:
+                if n:
+                    rn = await _resolve_node_id(str(n))
+                    if rn:
+                        resolved_nodes.append(rn)
+
+        payload = {'name': name.strip()}
+        if color:
+            payload['color'] = color
+        if resolved_nodes:
+            payload['nodeIds'] = resolved_nodes
+
+        try:
+            result = await graph_client.create_cluster(project_id, jwt_token, payload)
+            _mut('cluster_created', nodes=resolved_nodes)
+            return result
+        except Exception as e:
+            return {'error': f'Failed to create cluster: {e}'}
+
+    async def llm_add_node_to_cluster(cluster_id: str, node_id: str) -> dict:
+        """Add a knowledge graph node into an existing cluster.
+
+        Supports passing cluster name or clusterId for , and node name
+        or UUID for .
+
+        Args:
+            cluster_id: UUID of cluster or cluster name (e.g. 'cluster_1' or 'Machine Learning').
+            node_id: UUID of node or node name (e.g. 'Quantum Computing').
+
+        Returns:
+            dict: The updated cluster object.
+        """
+        if not cluster_id or not node_id:
+            return {'error': 'Both cluster_id and node_id are required'}
+
+        try:
+            resolved_cluster_id = await _resolve_cluster_id(cluster_id)
+            resolved_node_id = await _resolve_node_id(node_id)
+            result = await graph_client.add_node_to_cluster(
+                project_id, jwt_token, resolved_cluster_id, resolved_node_id
+            )
+            _mut('cluster_updated', nodes=[resolved_node_id])
+            return result
+        except Exception as e:
+            return {'error': f'Failed to add node to cluster: {e}'}
+
+    async def llm_remove_node_from_cluster(cluster_id: str, node_id: str) -> dict:
+        """Remove a knowledge graph node from a cluster.
+
+        Args:
+            cluster_id: UUID of cluster or cluster name.
+            node_id: UUID of node or node name.
+
+        Returns:
+            dict: The updated cluster or confirmation object.
+        """
+        if not cluster_id or not node_id:
+            return {'error': 'Both cluster_id and node_id are required'}
+
+        try:
+            resolved_cluster_id = await _resolve_cluster_id(cluster_id)
+            resolved_node_id = await _resolve_node_id(node_id)
+            result = await graph_client.remove_node_from_cluster(
+                project_id, jwt_token, resolved_cluster_id, resolved_node_id
+            )
+            _mut('cluster_updated', nodes=[resolved_node_id])
+            return result
+        except Exception as e:
+            return {'error': f'Failed to remove node from cluster: {e}'}
+
     return [
         llm_get_all_nodes,
         llm_get_all_edges,
@@ -744,4 +885,8 @@ def build_graph_tools(
         llm_list_files,
         llm_read_file,
         llm_highlight,
+        llm_get_clusters,
+        llm_create_cluster,
+        llm_add_node_to_cluster,
+        llm_remove_node_from_cluster,
     ]

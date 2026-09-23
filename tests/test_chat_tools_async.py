@@ -28,6 +28,10 @@ ASYNC_TOOL_NAMES = {
     "llm_list_node_types",
     "llm_list_files",
     "llm_read_file",
+    "llm_get_clusters",
+    "llm_create_cluster",
+    "llm_add_node_to_cluster",
+    "llm_remove_node_from_cluster",
 }
 
 SYNC_TOOL_NAMES = {
@@ -39,7 +43,7 @@ SYNC_TOOL_NAMES = {
 
 
 def test_tool_function_types():
-    """Verify 17 graph tools are native coroutines and 4 local tools are sync functions."""
+    """Verify 21 graph tools are native coroutines and 4 local tools are sync functions."""
     mock_client = MagicMock(spec=GraphClient)
     tools_list = build_graph_tools(
         project_id="proj-1",
@@ -49,7 +53,7 @@ def test_tool_function_types():
     )
     tools = {t.__name__: t for t in tools_list}
 
-    assert len(tools) == 21
+    assert len(tools) == 25
     for name in ASYNC_TOOL_NAMES:
         assert name in tools, f"Missing async tool {name}"
         assert inspect.iscoroutinefunction(tools[name]), f"Tool {name} should be async def"
