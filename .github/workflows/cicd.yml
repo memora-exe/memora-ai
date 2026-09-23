@@ -79,6 +79,7 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 30m
           script: |
             set -e
             APP_DIR="${{ secrets.VPS_AI_DIR || '/opt/memora-ai' }}"
