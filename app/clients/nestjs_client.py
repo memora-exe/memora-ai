@@ -183,6 +183,47 @@ class NestJSClient:
                 raise GraphAPIError(f"internal PATCH {path} failed: {e}") from e
         return response.status_code
 
+    async def internal_post(
+        self,
+        path: str,
+        internal_token: str,
+        *,
+        json: dict | list | None = None,
+        timeout: float = 60.0,
+    ) -> dict:
+        """POST with X-Internal-Token header for service-to-service calls."""
+        url = f"{self._base_url}{path}"
+        headers = {
+            "X-Internal-Token": internal_token,
+            "Content-Type": "application/json",
+        }
+        try:
+            response = await self._get_http_client().post(
+                url, headers=headers, json=json, timeout=timeout
+            )
+        except Exception as e:
+            if "closed" in str(e).lower():
+                self._http_client = None
+                self._client_loop = None
+                try:
+                    response = await self._get_http_client().post(
+                        url, headers=headers, json=json, timeout=timeout
+                    )
+                except Exception as retry_e:
+                    raise GraphAPIError(f"internal POST {path} failed: {retry_e}") from retry_e
+            else:
+                raise GraphAPIError(f"internal POST {path} failed: {e}") from e
+
+        if response.status_code in _WRITE_OK:
+            return response.json() if response.content else {}
+
+        detail = response.text[:300] if response.text else ""
+        raise GraphAPIError(
+            f"internal POST {path} returned {response.status_code}: {detail}",
+            status_code=response.status_code,
+        )
+
+
 
 _shared_client: Optional[NestJSClient] = None
 

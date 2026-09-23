@@ -6,6 +6,7 @@ fns) and graph_writer.py (duplicate create_node/create_edge).
 from __future__ import annotations
 
 from app.clients.nestjs_client import NestJSClient
+from app.core.config import settings
 from app.core.errors import GraphAPIError
 
 
@@ -128,8 +129,10 @@ class GraphClient:
         headers = {}
         if jwt_token:
             headers["Authorization"] = f"Bearer {jwt_token}"
+        if settings.MEMORA_INTERNAL_TOKEN:
+            headers["X-Internal-Token"] = settings.MEMORA_INTERNAL_TOKEN
         try:
-            res = await self._client._http_client.get(url, headers=headers, timeout=60.0)
+            res = await self._client.http_client.get(url, headers=headers, timeout=120.0)
             res.raise_for_status()
             return res.content
         except Exception as e:
@@ -175,19 +178,57 @@ class GraphClient:
         if not nodes_payload and not edges_payload:
             return {"createdNodes": 0, "createdEdges": 0, "nodeIdMap": {}}
 
-        try:
-            res = await self._client.post(
-                f"/projects/{project_id}/graph/batch",
-                jwt_token,
-                json={"nodes": nodes_payload, "edges": edges_payload},
-                timeout=60.0,
-            )
-            return res if isinstance(res, dict) else {}
-        except Exception as e:
-            from app.common.logger.logger import get_logger
-            get_logger("GraphClient").warning(f"batch_write_graph failed, falling back to sequential writes: {e}")
-            await self.write_graph(project_id, jwt_token, graph_data)
-            return {"createdNodes": len(nodes_payload), "createdEdges": len(edges_payload), "nodeIdMap": {}}
+        payload = {"nodes": nodes_payload, "edges": edges_payload}
+        internal_token = settings.MEMORA_INTERNAL_TOKEN
+
+        # Primary route: Internal token endpoint (bypasses expired/missing user JWT)
+        if internal_token:
+            try:
+                res = await self._client.internal_post(
+                    f"/internal/projects/{project_id}/graph/batch",
+                    internal_token,
+                    json=payload,
+                    timeout=60.0,
+                )
+                return res if isinstance(res, dict) else {}
+            except Exception as e:
+                from app.common.logger.logger import get_logger
+                get_logger("GraphClient").warning(
+                    f"batch_write_graph internal endpoint failed: {e}"
+                )
+                # If auth error (401/403), do not fallback to sequential writes with bad auth
+                status = getattr(e, "status_code", None)
+                if status in (401, 403):
+                    raise
+
+        # Secondary route: Authenticated endpoint via JWT if internal token not available or failed
+        if jwt_token:
+            try:
+                res = await self._client.post(
+                    f"/projects/{project_id}/graph/batch",
+                    jwt_token,
+                    json=payload,
+                    timeout=60.0,
+                )
+                return res if isinstance(res, dict) else {}
+            except Exception as e:
+                from app.common.logger.logger import get_logger
+                get_logger("GraphClient").warning(
+                    f"batch_write_graph JWT endpoint failed: {e}"
+                )
+                status = getattr(e, "status_code", None)
+                if status in (401, 403):
+                    raise
+                # Fallback to sequential individual writes only for non-auth errors
+                await self.write_graph(project_id, jwt_token, graph_data)
+                return {
+                    "createdNodes": len(nodes_payload),
+                    "createdEdges": len(edges_payload),
+                    "nodeIdMap": {},
+                }
+
+        raise GraphAPIError("No valid internal token or JWT provided for batch_write_graph")
+
 
     async def write_graph(self, project_id: str, jwt_token: str, graph_data: dict) -> None:
         """Write nodes and edges from concept extraction. Replaces graph_writer.py."""

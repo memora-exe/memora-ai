@@ -44,18 +44,21 @@ async def aextract_concepts(text: str) -> dict:
     capped_text = text[: settings.INGESTION_TEXT_CHAR_CAP]
     prompt = PROMPT_INSTRUCTIONS + capped_text
 
-    for _ in range(2):
-        try:
-            res = await asyncio.wait_for(
-                llm.ainvoke(prompt),
-                timeout=float(settings.INGESTION_LLM_TIMEOUT_SEC),
-            )
-            raw_content = getattr(res, "content", res)
-            data = parse_llm_json(raw_content, fallback={})
-            if "nodes" in data and "edges" in data:
-                return data
-        except Exception:
-            continue
+    try:
+        res = await asyncio.wait_for(
+            llm.ainvoke(prompt),
+            timeout=float(settings.INGESTION_LLM_TIMEOUT_SEC),
+        )
+        raw_content = getattr(res, "content", res)
+        data = parse_llm_json(raw_content, fallback={})
+        if "nodes" in data and "edges" in data:
+            return data
+    except (asyncio.TimeoutError, TimeoutError):
+        # Do not retry infinitely on LLM timeout
+        pass
+    except Exception:
+        # Single try on parse / general error, don't loop endlessly
+        pass
 
     return {"nodes": [], "edges": []}
 
