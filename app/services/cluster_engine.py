@@ -138,6 +138,30 @@ async def detect_communities(
         communities = [set([n]) for n in G.nodes]
         modularity_score = 0.0
 
+    # 2b. Overlapping Community Expansion:
+    # A concept node can bridge multiple domains. Expand base communities so nodes with
+    # significant cross-community connections (bridge nodes, hub concepts) belong to multiple clusters.
+    base_communities = [set(c) for c in communities]
+    expanded_communities = [set(c) for c in base_communities]
+
+    if len(base_communities) > 1 and G.number_of_edges() > 0:
+        for n in G.nodes():
+            neighbors = set(G.neighbors(n))
+            deg = len(neighbors)
+            if deg == 0:
+                continue
+
+            for idx, base_comm in enumerate(base_communities):
+                if n not in base_comm:
+                    overlap_count = len(neighbors & base_comm)
+                    # Node belongs to this community as well if:
+                    # - has connection to it AND
+                    # - either ratio >= 25% of its total degree or >= 2 edges into this community
+                    if overlap_count >= 1 and (overlap_count / deg >= 0.25 or overlap_count >= 2):
+                        expanded_communities[idx].add(n)
+
+        communities = expanded_communities
+
     # Sort communities by size descending
     communities.sort(key=lambda c: len(c), reverse=True)
 
