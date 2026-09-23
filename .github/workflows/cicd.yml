@@ -85,14 +85,14 @@ jobs:
 
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
+            # Pull latest AI image with -q to prevent SSH buffer choking from progress spam
+            docker compose pull -q memora_ai
+
             # Stop existing container and free port 3020
             docker compose stop memora_ai || true
             docker compose rm -f memora_ai || true
             docker rm -f $(docker ps -q --filter "publish=3020") 2>/dev/null || true
             fuser -k 3020/tcp 2>/dev/null || true
-
-            # Pull latest AI image from GHCR
-            docker compose pull memora_ai
 
             # Recreate AI container cleanly within Docker Compose network
             docker compose up -d --no-deps --force-recreate memora_ai
