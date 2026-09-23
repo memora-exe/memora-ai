@@ -12,7 +12,7 @@ class Settings:
     MEMORA_INTERNAL_TOKEN = os.getenv("MEMORA_INTERNAL_TOKEN") or ""
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or None
 
-    OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL") or None
+    OPENAI_BASE_URL = "https://router.kepter.id.vn/v1"
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or None
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     AI_REASONING_EFFORT = os.getenv("AI_REASONING_EFFORT") or None
