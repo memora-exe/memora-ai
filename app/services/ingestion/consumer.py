@@ -60,7 +60,7 @@ async def publish_status(
     last_err = None
     for attempt in range(3):
         try:
-            await exchange.publish(message, routing_key=routing_key, mandatory=True)
+            await exchange.publish(message, routing_key=routing_key)
             logger.info(f"[publish_status] {file_id} {pattern} ok (attempt {attempt + 1})")
             return
         except Exception as e:
@@ -99,16 +99,46 @@ async def handle_message(message: aio_pika.IncomingMessage, exchange) -> None:
 
                 # Immediately notify BE that processing has started
                 try:
-                    await sync_status(file_id, project_id, "processing")
+                    code = await sync_status(file_id, project_id, "processing")
+                    if code == 404:
+                        logger.info(
+                            f"[handle_message] File {file_id} not found on backend (404), skipping ingestion"
+                        )
+                        return
                 except Exception as status_err:
                     logger.warning(f"Failed to update status to processing for {file_id}: {status_err}")
 
                 jwt_token = os.getenv("SYSTEM_JWT_TOKEN", "")
                 try:
-                    await process_file_pipeline(file_id, key, project_id, jwt_token)
+                    # Enforce hard 120s timeout on whole ingestion pipeline
+                    pipeline_timeout = float(
+                        getattr(settings, "INGESTION_PIPELINE_TIMEOUT_SEC", 120)
+                    )
+                    await asyncio.wait_for(
+                        process_file_pipeline(file_id, key, project_id, jwt_token),
+                        timeout=pipeline_timeout,
+                    )
                     await publish_status(exchange, file_id, project_id, True)
                 except FileCancelledError:
                     logger.info(f"[handle_message] skipping status publish for cancelled {file_id}")
+                    cancelled = True
+                except (asyncio.TimeoutError, TimeoutError) as te:
+                    logger.error(
+                        f"Pipeline timed out after {pipeline_timeout}s for file {file_id}: {te}"
+                    )
+                    if file_id and project_id:
+                        # Immediately sync failed status to PostgreSQL and push SSE
+                        await sync_status(file_id, project_id, "failed")
+                        try:
+                            await publish_status(
+                                exchange,
+                                file_id,
+                                project_id,
+                                False,
+                                f"Pipeline timed out after {pipeline_timeout}s",
+                            )
+                        except Exception as pe:
+                            logger.error(f"Error publishing timeout failure status: {pe}")
                     cancelled = True
 
             except asyncio.CancelledError:
@@ -117,10 +147,20 @@ async def handle_message(message: aio_pika.IncomingMessage, exchange) -> None:
             except Exception as e:
                 logger.error(f"Error processing file message: {e}", exc_info=True)
                 if file_id and project_id and not cancelled:
+                    # Sync failed status immediately via internal API
+                    try:
+                        await sync_status(file_id, project_id, "failed")
+                    except Exception as se:
+                        logger.error(f"Error syncing failed status: {se}")
                     try:
                         await publish_status(exchange, file_id, project_id, False, str(e))
                     except Exception as pe:
                         logger.error(f"Error publishing failure status: {pe}")
+            finally:
+                if file_id:
+                    task_registry.pop(file_id, None)
+                    clear_active_cache(file_id)
+
 
 
 def _extract_file_id(message_body: bytes) -> str | None:
@@ -136,10 +176,10 @@ async def start_consumer() -> None:
         logger.info("RabbitMQ is disabled (RABBITMQ_ENABLED=false). Skipping consumer.")
         return
 
-    await asyncio.sleep(5)
     connection = await aio_pika.connect_robust(settings.RABBITMQ_URL)
     channel = await connection.channel()
-    await channel.set_qos(prefetch_count=settings.INGESTION_CONCURRENCY)
+    prefetch = max(settings.INGESTION_CONCURRENCY * 2, 4)
+    await channel.set_qos(prefetch_count=prefetch)
 
     exchange = await channel.declare_exchange(
         "sk_repo_events", type="topic", durable=True

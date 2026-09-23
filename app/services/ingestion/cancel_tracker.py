@@ -25,20 +25,25 @@ ACTIVE_CACHE_TTL_SEC = 30.0
 _nestjs_client = NestJSClient(settings.NESTJS_API_URL)
 
 
-async def sync_status(file_id: str, project_id: str, status: str) -> None:
+async def sync_status(file_id: str, project_id: str, status: str) -> int | None:
     """Fallback path: PATCH status directly via NestJS internal API."""
     if not settings.MEMORA_INTERNAL_TOKEN:
         logger.warning("[sync_status] no MEMORA_INTERNAL_TOKEN configured; skipping")
-        return
+        return None
     try:
         code = await _nestjs_client.internal_patch(
             f"/internal/files/{file_id}/status",
             settings.MEMORA_INTERNAL_TOKEN,
             json={"status": status},
         )
-        logger.info(f"[sync_status] PATCH {file_id} -> {status} = {code}")
+        if code == 404:
+            logger.warning(f"[sync_status] file {file_id} not found on backend (404)")
+        else:
+            logger.info(f"[sync_status] PATCH {file_id} -> {status} = {code}")
+        return code
     except Exception as e:
         logger.error(f"[sync_status] FAILED {file_id} -> {status}: {e}")
+        return None
 
 
 async def is_file_active(file_id: str, project_id: str) -> bool:

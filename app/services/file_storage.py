@@ -12,7 +12,10 @@ from typing import Optional
 import httpx
 
 from app.core.config import settings
-from app.clients.nestjs_client import get_shared_nestjs_client
+from app.clients.nestjs_client import (
+    NestJSClient,
+    get_shared_nestjs_client,
+)
 from app.services.document_processor import clean_extracted_text
 
 
@@ -87,6 +90,10 @@ def save_document(project_id: str, file_id: str, markdown_content: str, metadata
     })
 
 
+async def _get_nestjs_client() -> NestJSClient:
+    return get_shared_nestjs_client()
+
+
 async def asave_document(project_id: str, file_id: str, markdown_content: str, metadata: Optional[dict] = None) -> None:
     clean_id = _clean_id(file_id)
     _safe_resolve(project_id, f'{clean_id}.md')
@@ -95,7 +102,7 @@ async def asave_document(project_id: str, file_id: str, markdown_content: str, m
     url = f"{client._base_url}/internal/files/{clean_id}/parsed"
     headers = _headers()
     headers["Content-Type"] = "application/json"
-    res = await client._http_client.post(
+    res = await client.http_client.post(
         url,
         headers=headers,
         json={

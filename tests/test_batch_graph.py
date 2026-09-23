@@ -10,6 +10,11 @@ from app.services.document_processor import extract_markdown
 class TestBatchGraphAndExtraction(unittest.IsolatedAsyncioTestCase):
     async def test_batch_write_graph_success(self):
         mock_client = AsyncMock(spec=NestJSClient)
+        mock_client.internal_post.return_value = {
+            "createdNodes": 2,
+            "createdEdges": 1,
+            "nodeIdMap": {"node a": "uuid-1", "node b": "uuid-2"},
+        }
         mock_client.post.return_value = {
             "createdNodes": 2,
             "createdEdges": 1,
@@ -30,10 +35,11 @@ class TestBatchGraphAndExtraction(unittest.IsolatedAsyncioTestCase):
         res = await graph_client.batch_write_graph("proj-1", "jwt-token", graph_data)
         self.assertEqual(res["createdNodes"], 2)
         self.assertEqual(res["createdEdges"], 1)
-        mock_client.post.assert_awaited_once()
+        mock_client.internal_post.assert_awaited_once()
 
     async def test_batch_write_graph_fallback_on_error(self):
         mock_client = AsyncMock(spec=NestJSClient)
+        mock_client.internal_post.side_effect = Exception("500 Internal Server Error")
         mock_client.post.side_effect = Exception("500 Internal Server Error")
         graph_client = GraphClient(mock_client)
 
