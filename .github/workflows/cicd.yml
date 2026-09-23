@@ -32,6 +32,7 @@ jobs:
       - name: Run tests
         env:
           PORT: 3020
+          MEMORA_INTERNAL_TOKEN: "ci-test-internal-token"
         run: pytest
 
   build-and-push:

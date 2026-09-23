@@ -104,6 +104,38 @@ class GraphClient:
             params={"source": source, "target": target, "maxDepth": max_depth},
         )
 
+    # ── Clusters ──────────────────────────────────────────────────────────
+
+    async def get_clusters(self, project_id: str, jwt_token: str) -> dict:
+        return await self._client.get(
+            f"/projects/{project_id}/graph/clusters", jwt_token
+        )
+
+    async def create_cluster(
+        self, project_id: str, jwt_token: str, payload: dict
+    ) -> dict:
+        return await self._client.post(
+            f"/projects/{project_id}/graph/clusters", jwt_token, json=payload
+        )
+
+    async def add_node_to_cluster(
+        self, project_id: str, jwt_token: str, cluster_id: str, node_id: str
+    ) -> dict:
+        return await self._client.post(
+            f"/projects/{project_id}/graph/clusters/{cluster_id}/nodes",
+            jwt_token,
+            json={"nodeId": node_id},
+        )
+
+    async def remove_node_from_cluster(
+        self, project_id: str, jwt_token: str, cluster_id: str, node_id: str
+    ) -> dict:
+        await self._client.delete(
+            f"/projects/{project_id}/graph/clusters/{cluster_id}/nodes/{node_id}",
+            jwt_token,
+        )
+        return {"success": True, "clusterId": cluster_id, "nodeId": node_id}
+
     # ── Node types ────────────────────────────────────────────────────────
 
     async def get_node_types(self, project_id: str, jwt_token: str) -> list[dict]:
