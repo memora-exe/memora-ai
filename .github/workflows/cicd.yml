@@ -84,10 +84,31 @@ jobs:
             set -e
             cd /opt/memora
 
+            if command -v flock >/dev/null 2>&1; then
+              exec 200>/tmp/memora_deploy.lock
+              flock -w 900 200
+            fi
+
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            # Pull latest AI image with -q to prevent SSH buffer choking from progress spam
-            docker compose pull -q memora_ai
+            # Free dangling images before pulling to avoid disk space pressure
+            docker image prune -f || true
+
+            # Pull latest AI image with retry and quiet mode
+            PULL_SUCCESS=false
+            for i in 1 2 3; do
+              echo "Pulling memora_ai (attempt $i/3)..."
+              if docker compose pull -q memora_ai; then
+                PULL_SUCCESS=true
+                break
+              fi
+              echo "Pull attempt $i failed, retrying in 10s..."
+              sleep 10
+            done
+            if [ "$PULL_SUCCESS" != "true" ]; then
+              echo "Failed to pull memora_ai after 3 attempts"
+              exit 1
+            fi
 
             # Stop existing container and free port 3020
             docker compose stop memora_ai || true
@@ -98,5 +119,5 @@ jobs:
             # Recreate AI container cleanly within Docker Compose network
             docker compose up -d --no-deps --force-recreate memora_ai
 
-            # Prune old images to prevent disk space exhaustion
-            docker image prune -af --filter "until=24h" || true
+            # Prune dangling images
+            docker image prune -f || true
