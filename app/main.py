@@ -38,7 +38,7 @@ app = FastAPI(
 # Allowed origins for CORS (default: FE 3000, BE 3010)
 _allowed_origins_env = os.getenv(
     "ALLOWED_ORIGINS",
-    "http://localhost:3000,http://localhost:3010,http://127.0.0.1:3000,http://127.0.0.1:3010",
+    "http://localhost:3000,http://localhost:3010,http://127.0.0.1:3000,http://127.0.0.1:3010,http://103.178.234.132:3000,http://103.178.234.132:3010,http://103.178.234.132",
 )
 allowed_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
 
@@ -46,6 +46,7 @@ allowed_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|103\.178\.234\.132)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
