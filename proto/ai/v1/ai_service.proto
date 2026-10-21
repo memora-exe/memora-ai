@@ -1,0 +1,174 @@
+syntax = "proto3";
+
+package ai.v1;
+
+option go_package = "ai/v1;aiv1";
+option java_multiple_files = true;
+option java_package = "com.memora.ai.v1";
+
+// ============================================================================
+// 1. DOCUMENT PARSER SERVICE (Stateless document parsing & markdown extraction)
+// ============================================================================
+service DocumentParserService {
+  rpc ParseDocument (ParseDocumentRequest) returns (ParseDocumentResponse);
+}
+
+message ParseDocumentRequest {
+  bytes file_content = 1;
+  string file_name = 2;
+  string mime_type = 3;
+  map<string, string> options = 4;
+}
+
+message DocumentChunk {
+  int32 chunk_index = 1;
+  string content = 2;
+  int32 start_char = 3;
+  int32 end_char = 4;
+  map<string, string> metadata = 5;
+}
+
+message DocumentMetadata {
+  int32 page_count = 1;
+  int32 word_count = 2;
+  string title = 3;
+  string detected_language = 4;
+}
+
+message ParseDocumentResponse {
+  string markdown_content = 1;
+  repeated DocumentChunk chunks = 2;
+  DocumentMetadata metadata = 3;
+}
+
+// ============================================================================
+// 2. EMBEDDING SERVICE (Stateless dense vector embeddings)
+// ============================================================================
+service EmbeddingService {
+  rpc GenerateEmbeddings (GenerateEmbeddingsRequest) returns (GenerateEmbeddingsResponse);
+}
+
+message GenerateEmbeddingsRequest {
+  repeated string texts = 1;
+  string model = 2;
+  int32 dimensions = 3;
+}
+
+message EmbeddingVector {
+  repeated float values = 1;
+}
+
+message UsageMetadata {
+  int32 prompt_tokens = 1;
+  int32 completion_tokens = 2;
+  int32 total_tokens = 3;
+}
+
+message GenerateEmbeddingsResponse {
+  repeated EmbeddingVector vectors = 1;
+  UsageMetadata usage = 2;
+}
+
+// ============================================================================
+// 3. RERANK SERVICE (Stateless semantic cross-encoder reranking)
+// ============================================================================
+service RerankService {
+  rpc Rerank (RerankRequest) returns (RerankResponse);
+}
+
+message RerankRequest {
+  string query = 1;
+  repeated string documents = 2;
+  string model = 3;
+  int32 top_n = 4;
+}
+
+message RankedDocument {
+  int32 index = 1;
+  float score = 2;
+  string document = 3;
+}
+
+message RerankResponse {
+  repeated RankedDocument results = 1;
+}
+
+// ============================================================================
+// 4. LLM SERVICE (Stateless completion & token streaming)
+// ============================================================================
+service LlmService {
+  rpc ChatCompletion (ChatCompletionRequest) returns (ChatCompletionResponse);
+  rpc ChatCompletionStream (ChatCompletionRequest) returns (stream ChatCompletionChunk);
+}
+
+message LlmMessage {
+  string role = 1; // "system", "user", "assistant", "tool"
+  string content = 2;
+  string name = 3;
+  string tool_call_id = 4;
+}
+
+message LlmTool {
+  string name = 1;
+  string description = 2;
+  string parameters_json_schema = 3;
+}
+
+message ToolCall {
+  string id = 1;
+  string name = 2;
+  string arguments_json = 3;
+}
+
+message ChatCompletionRequest {
+  repeated LlmMessage messages = 1;
+  repeated LlmTool tools = 2;
+  string model = 3;
+  float temperature = 4;
+  int32 max_tokens = 5;
+  map<string, string> response_format = 6;
+}
+
+message ChatCompletionResponse {
+  string content = 1;
+  repeated ToolCall tool_calls = 2;
+  UsageMetadata usage = 3;
+  string finish_reason = 4;
+}
+
+message ChatCompletionChunk {
+  string delta_content = 1;
+  repeated ToolCall delta_tool_calls = 2;
+  UsageMetadata usage = 3;
+  bool is_done = 4;
+}
+
+// ============================================================================
+// 5. GRAPH ML SERVICE (Stateless graph clustering & community algorithms)
+// ============================================================================
+service GraphMlService {
+  rpc DetectCommunities (DetectCommunitiesRequest) returns (DetectCommunitiesResponse);
+}
+
+message GraphEdgeInput {
+  string source_id = 1;
+  string target_id = 2;
+  float weight = 3;
+}
+
+message DetectCommunitiesRequest {
+  repeated string node_ids = 1;
+  repeated GraphEdgeInput edges = 2;
+  string algorithm = 3; // "louvain", "infomap", "label_propagation"
+  map<string, string> parameters = 4;
+}
+
+message ClusterAssignment {
+  string cluster_id = 1;
+  repeated string node_ids = 2;
+  map<string, float> metrics = 3;
+}
+
+message DetectCommunitiesResponse {
+  repeated ClusterAssignment clusters = 1;
+}
