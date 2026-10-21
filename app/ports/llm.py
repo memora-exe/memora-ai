@@ -1,27 +1,24 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Iterator, List, Optional
-from dataclasses import dataclass, field
+from pydantic import BaseModel, Field
 
 
-@dataclass
-class ChatMessageData:
+class ChatMessageData(BaseModel):
     role: str
     content: str
 
 
-@dataclass
-class ChatCompletionResult:
+class ChatCompletionResult(BaseModel):
     content: str
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
     finish_reason: str = "stop"
 
 
-@dataclass
-class ChatStreamChunkResult:
-    delta_content: str
-    is_done: bool
+class ChatStreamChunkResult(BaseModel):
+    delta_content: str = ""
+    is_done: bool = False
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
