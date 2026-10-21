@@ -6,6 +6,7 @@ from app.services.ingestion.pipeline import process_file_pipeline
 
 
 class TestIngestionPipeline(unittest.IsolatedAsyncioTestCase):
+    @patch("app.services.ingestion.pipeline._graph_client.get_nodes", new_callable=AsyncMock)
     @patch("app.services.ingestion.pipeline._graph_client.download_file", new_callable=AsyncMock)
     @patch("app.services.ingestion.pipeline._graph_client.batch_write_graph", new_callable=AsyncMock)
     @patch("app.services.ingestion.pipeline.extract_markdown")
@@ -20,10 +21,12 @@ class TestIngestionPipeline(unittest.IsolatedAsyncioTestCase):
         mock_extract_markdown,
         mock_batch_write_graph,
         mock_download_file,
+        mock_get_nodes,
     ):
         mock_download_file.return_value = b"sample file bytes"
         mock_extract_markdown.return_value = "Paragraph 1\nParagraph 2 content"
         mock_is_active.return_value = True
+        mock_get_nodes.return_value = []
         mock_aextract_concepts.return_value = {"nodes": [{"title": "ConceptA"}], "edges": []}
         mock_batch_write_graph.return_value = {"createdNodes": 1, "createdEdges": 0}
 
@@ -45,11 +48,69 @@ class TestIngestionPipeline(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        # Verify concepts were extracted and batch-written to graph
+        # Verify concepts were extracted and batch-written to graph with entity linking
         mock_aextract_concepts.assert_awaited_once_with("Paragraph 1\nParagraph 2 content")
-        mock_batch_write_graph.assert_awaited_once_with(
-            project_id, jwt_token, {"nodes": [{"title": "ConceptA"}], "edges": []}
-        )
+        mock_batch_write_graph.assert_awaited_once()
+        call_args = mock_batch_write_graph.await_args[0]
+        self.assertEqual(call_args[0], project_id)
+        self.assertEqual(call_args[1], jwt_token)
+        self.assertEqual(call_args[2]["nodes"][0]["title"], "ConceptA")
+        self.assertTrue(call_args[2]["nodes"][0]["is_new"])
+
+    @patch("app.services.ingestion.pipeline._graph_client.get_nodes", new_callable=AsyncMock)
+    @patch("app.services.ingestion.pipeline._graph_client.download_file", new_callable=AsyncMock)
+    @patch("app.services.ingestion.pipeline._graph_client.batch_write_graph", new_callable=AsyncMock)
+    @patch("app.services.ingestion.pipeline.extract_markdown")
+    @patch("app.services.ingestion.pipeline.aextract_concepts", new_callable=AsyncMock)
+    @patch("app.services.ingestion.pipeline.asave_document", new_callable=AsyncMock)
+    @patch("app.services.ingestion.pipeline.is_file_active", new_callable=AsyncMock)
+    async def test_process_file_pipeline_with_entity_linking(
+        self,
+        mock_is_active,
+        mock_asave_document,
+        mock_aextract_concepts,
+        mock_extract_markdown,
+        mock_batch_write_graph,
+        mock_download_file,
+        mock_get_nodes,
+    ):
+        mock_download_file.return_value = b"sample file bytes"
+        mock_extract_markdown.return_value = "Doc text"
+        mock_is_active.return_value = True
+        mock_get_nodes.return_value = [
+            {"nodeId": "existing-uuid-1", "nodeName": "Authentication System"}
+        ]
+        mock_aextract_concepts.return_value = {
+            "nodes": [
+                {"title": "Authentication System", "description": "Auth mechanism"},
+                {"title": "Redis Cache", "description": "Cache store"},
+            ],
+            "edges": [
+                {"source": "Authentication System", "target": "Redis Cache", "type": "USES"}
+            ],
+        }
+        mock_batch_write_graph.return_value = {"createdNodes": 1, "createdEdges": 1}
+
+        project_id = "test_proj_pipeline"
+        file_id = "test_file_456"
+        key = "uploads/auth.pdf"
+        jwt_token = "mock_jwt"
+
+        await process_file_pipeline(file_id, key, project_id, jwt_token)
+
+        mock_batch_write_graph.assert_awaited_once()
+        written_data = mock_batch_write_graph.await_args[0][2]
+
+        auth_node = next(n for n in written_data["nodes"] if n["title"] == "Authentication System")
+        self.assertFalse(auth_node["is_new"])
+        self.assertEqual(auth_node["nodeId"], "existing-uuid-1")
+
+        redis_node = next(n for n in written_data["nodes"] if n["title"] == "Redis Cache")
+        self.assertTrue(redis_node["is_new"])
+
+        edge = written_data["edges"][0]
+        self.assertEqual(edge["sourceNodeId"], "existing-uuid-1")
+        self.assertEqual(edge["targetNodeId"], redis_node["nodeId"])
 
     def test_clean_extracted_text_sanitizes_binary(self):
         from app.services.document_processor import clean_extracted_text

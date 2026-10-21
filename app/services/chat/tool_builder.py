@@ -863,6 +863,55 @@ def build_graph_tools(
         except Exception as e:
             return {'error': f'Failed to remove node from cluster: {e}'}
 
+    async def llm_graphrag_search(
+        query: str,
+        max_hops: int = 2,
+        max_seeds: int = 5,
+    ) -> dict:
+        """Search the knowledge graph using non-vector GraphRAG context retrieval.
+
+        Use this tool when you need deep factual context, local knowledge subgraphs,
+        or related concepts around a specific question, keyword, or domain entity.
+        Traverses 1-2 hops around matched seed concepts and serializes the local graph.
+
+        Args:
+            query: The search keywords or natural language topic to locate in the graph (REQUIRED).
+            max_hops: Maximum traversal depth from seed entities (default 2, 1-2 recommended).
+            max_seeds: Maximum number of seed entities to match (default 5).
+
+        Returns:
+            The serialized Markdown graph context and list of matched seed entities.
+        """
+        if not query or not str(query).strip():
+            return {"error": "Query cannot be empty", "context": ""}
+
+        try:
+            from app.services.search.graphrag_retriever import GraphRagRetriever
+            retriever = GraphRagRetriever(graph_client=graph_client)
+            result = await retriever.retrieve_context(
+                project_id=project_id,
+                query=str(query).strip(),
+                jwt_token=jwt_token,
+                max_hops=max(1, min(3, int(max_hops or 2))),
+                max_seeds=max(1, min(10, int(max_seeds or 5))),
+            )
+            seed_ids = [extract_node_id(s) for s in result.get("seeds", []) if extract_node_id(s)]
+            if seed_ids:
+                record_highlight(
+                    project_id,
+                    session_id,
+                    [{"id": sid, "color": "#00E5FF", "kind": "node"} for sid in seed_ids],
+                    description=f"GraphRAG matched seeds for '{query}'",
+                )
+            return {
+                "context": result.get("serializedMarkdown", ""),
+                "seed_count": len(result.get("seeds", [])),
+                "subgraph_nodes_count": len(result.get("subgraphNodes", [])),
+                "subgraph_edges_count": len(result.get("subgraphEdges", [])),
+            }
+        except Exception as e:
+            return {"error": f"GraphRAG retrieval failed: {e}", "context": ""}
+
     return [
         llm_get_all_nodes,
         llm_get_all_edges,
@@ -870,6 +919,7 @@ def build_graph_tools(
         llm_traverse_graph,
         llm_find_path,
         llm_generate_flashcards,
+        llm_graphrag_search,
         llm_glob_files,
         llm_grep_search,
         llm_read_file_content,

@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.errors import FileCancelledError
 from app.services.concept_extractor import aextract_concepts
 from app.services.document_processor import extract_markdown
+from app.services.entity_linker import EntityLinker
 from app.services.file_storage import asave_document
 from app.services.ingestion.cancel_tracker import clear_active_cache, is_file_active, task_registry
 
@@ -50,7 +51,19 @@ async def process_file_pipeline(file_id: str, key: str, project_id: str, jwt_tok
         if not await is_file_active(file_id, project_id):
             raise FileCancelledError(file_id)
 
-        await _graph_client.batch_write_graph(project_id, jwt_token, concepts)
+        # Entity Linker & Deduplication via RapidFuzz (>= 85 threshold)
+        try:
+            existing_nodes = await _graph_client.get_nodes(project_id, jwt_token)
+            if not isinstance(existing_nodes, list):
+                existing_nodes = []
+        except Exception as e:
+            logger.warning(f"Failed to fetch existing nodes for entity linking: {e}")
+            existing_nodes = []
+
+        linker = EntityLinker(threshold=85.0)
+        linked_concepts, _ = linker.link_and_deduplicate_concepts(concepts, existing_nodes)
+
+        await _graph_client.batch_write_graph(project_id, jwt_token, linked_concepts)
         logger.info(f"Successfully processed file {file_id}")
     finally:
         if tmp_path and os.path.exists(tmp_path):
