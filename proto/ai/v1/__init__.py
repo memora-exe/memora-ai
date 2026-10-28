@@ -10,13 +10,6 @@ __all__ = [
     "ParseDocumentResponse",
     "DocumentChunk",
     "DocumentMetadata",
-    # Embedding
-    "EmbeddingServiceStub",
-    "EmbeddingServiceServicer",
-    "add_EmbeddingServiceServicer_to_server",
-    "GenerateEmbeddingsRequest",
-    "GenerateEmbeddingsResponse",
-    "EmbeddingVector",
     # Rerank
     "RerankServiceStub",
     "RerankServiceServicer",

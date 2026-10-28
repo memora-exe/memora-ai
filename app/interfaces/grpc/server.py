@@ -1,5 +1,5 @@
 """gRPC Server entrypoint for memora-ai LibIOG3 Architecture.
-Runs stateless technical services for AI, ML, Parsing, Embedding, Reranking, and Graph clustering.
+Runs stateless technical services for AI, ML, Parsing, Reranking, and Graph clustering.
 """
 import logging
 import os
@@ -20,7 +20,6 @@ if proto_dir not in sys.path:
 from ai.v1 import ai_service_pb2_grpc as pb2_grpc
 from .servicer import (
     DocumentParserServicer,
-    EmbeddingServicer,
     GraphMlServicer,
     LlmServicer,
     RerankServicer,
@@ -36,7 +35,7 @@ def create_server(
     max_workers: int = 10,
     interceptors: Optional[Sequence[grpc.ServerInterceptor]] = None,
 ) -> grpc.Server:
-    """Create and configure gRPC server with interceptors and all 5 stateless servicers."""
+    """Create and configure gRPC server with interceptors and all 4 stateless servicers."""
     server_interceptors = list(interceptors) if interceptors is not None else [
         LoggingInterceptor(),
         ErrorInterceptor(),
@@ -53,7 +52,6 @@ def create_server(
 
     # Register servicers
     pb2_grpc.add_DocumentParserServiceServicer_to_server(DocumentParserServicer(), server)
-    pb2_grpc.add_EmbeddingServiceServicer_to_server(EmbeddingServicer(), server)
     pb2_grpc.add_RerankServiceServicer_to_server(RerankServicer(), server)
     pb2_grpc.add_LlmServiceServicer_to_server(LlmServicer(), server)
     pb2_grpc.add_GraphMlServiceServicer_to_server(GraphMlServicer(), server)

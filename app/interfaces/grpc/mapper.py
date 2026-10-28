@@ -1,5 +1,5 @@
-import sys
 import os
+import sys
 from typing import List
 
 # Ensure generated protobuf modules can be imported
@@ -9,8 +9,7 @@ if proto_dir not in sys.path:
     sys.path.insert(0, proto_dir)
 
 from ai.v1 import ai_service_pb2 as pb2
-from ...ports.document_parser import ParsedDocumentResult, DocumentChunkData, DocumentMetadataData
-from ...ports.embedder import EmbeddingResult
+from ...ports.document_parser import ParsedDocumentResult
 from ...ports.reranker import RankedDocumentData
 from ...ports.llm import ChatMessageData, ChatCompletionResult, ChatStreamChunkResult
 from ...ports.graph_ml import EdgeData, ClusterAssignmentData
@@ -52,19 +51,6 @@ def to_proto_parse_response(result: ParsedDocumentResult) -> pb2.ParseDocumentRe
         chunks=chunks,
         metadata=metadata,
     )
-
-
-def to_proto_embedding_response(result: EmbeddingResult) -> pb2.GenerateEmbeddingsResponse:
-    vectors = [
-        pb2.EmbeddingVector(values=v)
-        for v in result.vectors
-    ]
-    usage = pb2.UsageMetadata(
-        prompt_tokens=result.prompt_tokens,
-        completion_tokens=result.completion_tokens,
-        total_tokens=result.total_tokens,
-    )
-    return pb2.GenerateEmbeddingsResponse(vectors=vectors, usage=usage)
 
 
 def to_proto_rerank_response(results: List[RankedDocumentData]) -> pb2.RerankResponse:

@@ -10,5 +10,5 @@ Mọi thay đổi code BẮT BUỘC phải chạy và pass 100% các bước CI:
 ## Testing policy
 
 Unit & Integration tests are permitted. Validate functionality through:
-- Unit tests for all 5 gRPC servicers, adapters, ports, and protobuf mappers (`tests/unit/test_grpc_services.py`).
+- Unit tests for all 4 gRPC servicers, adapters, ports, and protobuf mappers (`tests/unit/test_grpc_services.py`).
 - In-process loopback gRPC channels.

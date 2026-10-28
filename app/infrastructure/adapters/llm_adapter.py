@@ -1,44 +1,48 @@
 from typing import Iterator, List
 
 from ...ports.llm import (
-    LlmPort,
     ChatMessageData,
     ChatCompletionResult,
     ChatStreamChunkResult,
+    LlmPort,
 )
 from ..config.settings import settings
 
 
 class LlmAdapter(LlmPort):
-    """Adapter for LLM completions and streaming using Gemini/OpenAI with fallback."""
+    """Adapter for LLM completions and streaming using standard OpenAI client/spec."""
 
-    def __init__(self, gemini_key: str = "", openai_key: str = ""):
-        self.gemini_key = gemini_key or settings.gemini_api_key
+    def __init__(self, openai_key: str = "", openai_base_url: str = ""):
         self.openai_key = openai_key or settings.openai_api_key
+        self.openai_base_url = openai_base_url or settings.openai_base_url
 
     def chat_completion(
         self,
         messages: List[ChatMessageData],
-        model: str = "gemini-2.5-flash",
+        model: str = "",
         temperature: float = 0.7,
     ) -> ChatCompletionResult:
-        model_name = model or "gemini-2.5-flash"
+        model_name = model or settings.openai_model or "gpt-4o-mini"
         last_user_msg = ""
         for m in reversed(messages):
             if m.role == "user":
                 last_user_msg = m.content
                 break
 
-        if self.gemini_key and "gemini" in model_name.lower():
+        if self.openai_key:
             try:
-                from langchain_google_genai import ChatGoogleGenerativeAI
+                from langchain_openai import ChatOpenAI
                 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
-                chat = ChatGoogleGenerativeAI(
-                    model=model_name,
-                    google_api_key=self.gemini_key,
-                    temperature=temperature,
-                )
+                init_kwargs = {
+                    "model": model_name,
+                    "api_key": self.openai_key,
+                    "temperature": temperature,
+                }
+                if self.openai_base_url:
+                    init_kwargs["base_url"] = self.openai_base_url
+
+                chat = ChatOpenAI(**init_kwargs)
                 lc_msgs = []
                 for m in messages:
                     if m.role == "system":
@@ -80,26 +84,30 @@ class LlmAdapter(LlmPort):
     def chat_completion_stream(
         self,
         messages: List[ChatMessageData],
-        model: str = "gemini-2.5-flash",
+        model: str = "",
         temperature: float = 0.7,
     ) -> Iterator[ChatStreamChunkResult]:
-        model_name = model or "gemini-2.5-flash"
+        model_name = model or settings.openai_model or "gpt-4o-mini"
         last_user_msg = ""
         for m in reversed(messages):
             if m.role == "user":
                 last_user_msg = m.content
                 break
 
-        if self.gemini_key and "gemini" in model_name.lower():
+        if self.openai_key:
             try:
-                from langchain_google_genai import ChatGoogleGenerativeAI
+                from langchain_openai import ChatOpenAI
                 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
-                chat = ChatGoogleGenerativeAI(
-                    model=model_name,
-                    google_api_key=self.gemini_key,
-                    temperature=temperature,
-                )
+                init_kwargs = {
+                    "model": model_name,
+                    "api_key": self.openai_key,
+                    "temperature": temperature,
+                }
+                if self.openai_base_url:
+                    init_kwargs["base_url"] = self.openai_base_url
+
+                chat = ChatOpenAI(**init_kwargs)
                 lc_msgs = []
                 for m in messages:
                     if m.role == "system":

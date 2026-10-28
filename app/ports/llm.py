@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Iterator, List, Optional
-from pydantic import BaseModel, Field
+from typing import Iterator, List
+from pydantic import BaseModel
 
 
 class ChatMessageData(BaseModel):
@@ -31,7 +31,7 @@ class LlmPort(ABC):
     def chat_completion(
         self,
         messages: List[ChatMessageData],
-        model: str = "gemini-2.5-flash",
+        model: str = "gpt-4o-mini",
         temperature: float = 0.7,
     ) -> ChatCompletionResult:
         """Run non-streaming chat completion."""
@@ -41,7 +41,7 @@ class LlmPort(ABC):
     def chat_completion_stream(
         self,
         messages: List[ChatMessageData],
-        model: str = "gemini-2.5-flash",
+        model: str = "gpt-4o-mini",
         temperature: float = 0.7,
     ) -> Iterator[ChatStreamChunkResult]:
         """Stream chat completion chunks."""

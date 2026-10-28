@@ -4,7 +4,6 @@ from .document_parser import (
     DocumentChunkData,
     DocumentMetadataData,
 )
-from .embedder import EmbedderPort, EmbeddingResult
 from .reranker import RerankerPort, RankedDocumentData
 from .llm import (
     LlmPort,
@@ -19,8 +18,6 @@ __all__ = [
     "ParsedDocumentResult",
     "DocumentChunkData",
     "DocumentMetadataData",
-    "EmbedderPort",
-    "EmbeddingResult",
     "RerankerPort",
     "RankedDocumentData",
     "LlmPort",

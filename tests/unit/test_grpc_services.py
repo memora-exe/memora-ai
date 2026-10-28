@@ -1,13 +1,13 @@
-"""Unit & Integration tests for all 5 gRPC AI Servicers (LibIOG3 architecture).
+"""Unit & Integration tests for all 4 gRPC AI Servicers (LibIOG3 architecture).
 Uses real in-memory / local loopback gRPC channel.
 """
 import io
-import sys
 import os
-import pytest
-import grpc
-import fitz
+import sys
 import docx
+import fitz
+import grpc
+import pytest
 
 # Ensure paths
 ai_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -71,7 +71,7 @@ def test_parse_pdf_document(grpc_channel_and_server):
     p1 = pdf_doc.new_page()
     p1.insert_text((50, 72), "First page content about Graph ML.")
     p2 = pdf_doc.new_page()
-    p2.insert_text((50, 72), "Second page content about Dense Vector Embeddings.")
+    p2.insert_text((50, 72), "Second page content about Graph Knowledge.")
     pdf_bytes = pdf_doc.write()
     pdf_doc.close()
 
@@ -115,36 +115,7 @@ def test_parse_docx_document(grpc_channel_and_server):
 
 
 # =====================================================================
-# 2. EMBEDDING SERVICE TESTS
-# =====================================================================
-def test_generate_embeddings(grpc_channel_and_server):
-    stub = pb2_grpc.EmbeddingServiceStub(grpc_channel_and_server)
-    texts = ["Memora knowledge graph", "Vector similarity search", "Fast stateless proxy"]
-    request = pb2.GenerateEmbeddingsRequest(
-        texts=texts,
-        model="text-embedding-004",
-        dimensions=128,
-    )
-    response = stub.GenerateEmbeddings(request)
-
-    assert len(response.vectors) == 3
-    for vec in response.vectors:
-        assert len(vec.values) == 128
-        # Ensure values are non-empty floats
-        assert any(abs(v) > 0 for v in vec.values)
-
-    assert response.usage.total_tokens > 0
-
-
-def test_generate_embeddings_empty(grpc_channel_and_server):
-    stub = pb2_grpc.EmbeddingServiceStub(grpc_channel_and_server)
-    request = pb2.GenerateEmbeddingsRequest(texts=[])
-    response = stub.GenerateEmbeddings(request)
-    assert len(response.vectors) == 0
-
-
-# =====================================================================
-# 3. RERANK SERVICE TESTS
+# 2. RERANK SERVICE TESTS
 # =====================================================================
 def test_rerank_documents(grpc_channel_and_server):
     stub = pb2_grpc.RerankServiceStub(grpc_channel_and_server)
@@ -171,7 +142,7 @@ def test_rerank_documents(grpc_channel_and_server):
 
 
 # =====================================================================
-# 4. LLM SERVICE TESTS (UNARY + STREAMING)
+# 3. LLM SERVICE TESTS (UNARY + STREAMING)
 # =====================================================================
 def test_llm_chat_completion(grpc_channel_and_server):
     stub = pb2_grpc.LlmServiceStub(grpc_channel_and_server)
@@ -181,7 +152,7 @@ def test_llm_chat_completion(grpc_channel_and_server):
     ]
     request = pb2.ChatCompletionRequest(
         messages=messages,
-        model="gemini-2.5-flash",
+        model="gpt-4o-mini",
         temperature=0.5,
     )
     response = stub.ChatCompletion(request)
@@ -198,7 +169,7 @@ def test_llm_chat_completion_stream(grpc_channel_and_server):
     ]
     request = pb2.ChatCompletionRequest(
         messages=messages,
-        model="gemini-2.5-flash",
+        model="gpt-4o-mini",
     )
     stream = stub.ChatCompletionStream(request)
 
@@ -218,7 +189,7 @@ def test_llm_chat_completion_stream(grpc_channel_and_server):
 
 
 # =====================================================================
-# 5. GRAPH ML SERVICE TESTS
+# 4. GRAPH ML SERVICE TESTS
 # =====================================================================
 def test_detect_communities(grpc_channel_and_server):
     stub = pb2_grpc.GraphMlServiceStub(grpc_channel_and_server)
@@ -254,33 +225,22 @@ def test_detect_communities_empty(grpc_channel_and_server):
 
 
 # =====================================================================
-# 6. LIBIOG3 STRUCTURE VALIDATION TESTS
+# 5. LIBIOG3 STRUCTURE VALIDATION TESTS
 # =====================================================================
 def test_libiog3_adapter_structure():
     """Verify adapters follow LibIOG3 naming and backward compatibility wrappers."""
-    from app.infrastructure.adapters.embedder_adapter import EmbedderAdapter, EmbeddingAdapter
     from app.infrastructure.adapters.reranker_adapter import RerankerAdapter, RerankAdapter
-    from app.infrastructure.adapters.embedding_adapter import EmbeddingAdapter as WrapperEmbeddingAdapter
     from app.infrastructure.adapters.rerank_adapter import RerankAdapter as WrapperRerankAdapter
     from app.infrastructure.adapters import (
         DocumentParserAdapter,
-        EmbedderAdapter as ExportedEmbedder,
         RerankerAdapter as ExportedReranker,
         LlmAdapter,
         GraphMlAdapter,
     )
 
-    assert EmbedderAdapter is EmbeddingAdapter
-    assert EmbedderAdapter is WrapperEmbeddingAdapter
-    assert EmbedderAdapter is ExportedEmbedder
-
     assert RerankerAdapter is RerankAdapter
     assert RerankerAdapter is WrapperRerankAdapter
     assert RerankerAdapter is ExportedReranker
-
-    embedder = EmbedderAdapter()
-    res = embedder.generate_embeddings(["test"])
-    assert len(res.vectors) == 1
 
     reranker = RerankerAdapter()
     ranked = reranker.rerank("test", ["test doc", "other"])
@@ -295,17 +255,14 @@ def test_libiog3_proto_structure():
     import proto.ai_service_pb2_grpc as root_pb2_grpc
 
     assert hasattr(proto_pb2, "ParseDocumentRequest")
-    assert hasattr(proto_pb2, "GenerateEmbeddingsRequest")
     assert hasattr(proto_pb2, "RerankRequest")
     assert hasattr(proto_pb2, "ChatCompletionRequest")
     assert hasattr(proto_pb2, "DetectCommunitiesRequest")
 
     assert hasattr(proto_pb2_grpc, "DocumentParserServiceStub")
-    assert hasattr(proto_pb2_grpc, "EmbeddingServiceStub")
     assert hasattr(proto_pb2_grpc, "RerankServiceStub")
     assert hasattr(proto_pb2_grpc, "LlmServiceStub")
     assert hasattr(proto_pb2_grpc, "GraphMlServiceStub")
 
     assert hasattr(root_pb2, "ParseDocumentRequest")
     assert hasattr(root_pb2_grpc, "DocumentParserServiceStub")
-

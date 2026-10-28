@@ -12,14 +12,12 @@ from ai.v1 import ai_service_pb2 as pb2
 from ai.v1 import ai_service_pb2_grpc as pb2_grpc
 
 from ...ports.document_parser import DocumentParserPort
-from ...ports.embedder import EmbedderPort
 from ...ports.reranker import RerankerPort
 from ...ports.llm import LlmPort
 from ...ports.graph_ml import GraphMlPort
 
 from ...infrastructure.adapters.document_parser_adapter import DocumentParserAdapter
-from ...infrastructure.adapters.embedder_adapter import EmbedderAdapter, EmbeddingAdapter
-from ...infrastructure.adapters.reranker_adapter import RerankerAdapter, RerankAdapter
+from ...infrastructure.adapters.reranker_adapter import RerankerAdapter
 from ...infrastructure.adapters.llm_adapter import LlmAdapter
 from ...infrastructure.adapters.graph_ml_adapter import GraphMlAdapter
 
@@ -27,7 +25,6 @@ from .mapper import (
     map_proto_messages_to_domain,
     map_proto_edges_to_domain,
     to_proto_parse_response,
-    to_proto_embedding_response,
     to_proto_rerank_response,
     to_proto_chat_completion,
     to_proto_chat_chunk,
@@ -49,23 +46,6 @@ class DocumentParserServicer(pb2_grpc.DocumentParserServiceServicer):
             options=dict(request.options or {}),
         )
         return to_proto_parse_response(result)
-
-
-class EmbeddingServicer(pb2_grpc.EmbeddingServiceServicer):
-    """gRPC servicer for vector embeddings delegating to EmbedderPort."""
-
-    def __init__(self, embedder: Optional[EmbedderPort] = None):
-        self.embedder = embedder or EmbedderAdapter()
-
-    def GenerateEmbeddings(
-        self, request: pb2.GenerateEmbeddingsRequest, context
-    ) -> pb2.GenerateEmbeddingsResponse:
-        texts = list(request.texts)
-        model = request.model or "text-embedding-004"
-        dimensions = request.dimensions if request.dimensions > 0 else 768
-
-        result = self.embedder.generate_embeddings(texts=texts, model=model, dimensions=dimensions)
-        return to_proto_embedding_response(result)
 
 
 class RerankServicer(pb2_grpc.RerankServiceServicer):
@@ -95,7 +75,7 @@ class LlmServicer(pb2_grpc.LlmServiceServicer):
         messages = map_proto_messages_to_domain(request.messages)
         result = self.llm.chat_completion(
             messages=messages,
-            model=request.model or "gemini-2.5-flash",
+            model=request.model or "",
             temperature=request.temperature or 0.7,
         )
         return to_proto_chat_completion(result)
@@ -106,7 +86,7 @@ class LlmServicer(pb2_grpc.LlmServiceServicer):
         messages = map_proto_messages_to_domain(request.messages)
         for chunk in self.llm.chat_completion_stream(
             messages=messages,
-            model=request.model or "gemini-2.5-flash",
+            model=request.model or "",
             temperature=request.temperature or 0.7,
         ):
             yield to_proto_chat_chunk(chunk)
