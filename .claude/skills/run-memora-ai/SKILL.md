@@ -1,9 +1,9 @@
 ---
 name: run-memora-ai
-description: Build, run, and drive the memora-ai FastAPI microservice. Use when asked to start the AI service, run its tests, hit its chat or search endpoints, or test Gemini integration on port 8000.
+description: Build, run, and drive the memora-ai FastAPI microservice. Use when asked to start the AI service, run its tests, hit its chat or search endpoints on port 8000.
 ---
 
-Memora-ai is the python AI microservice built with FastAPI, LangChain, and Google ADK. An agent drives it via the stdlib-only python driver `.claude/skills/run-memora-ai/driver.py` and reads its OpenAPI doc at `/docs`.
+Memora-ai is the python AI microservice built with FastAPI and LangChain. An agent drives it via the stdlib-only python driver `.claude/skills/run-memora-ai/driver.py` and reads its OpenAPI doc at `/docs`.
 
 All paths below are relative to `memora-ai/`.
 
@@ -30,10 +30,10 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Ensure `GOOGLE_API_KEY` is set in `.env` to allow Gemini API calls to succeed:
+Ensure `OPENAI_API_KEY` is set in `.env` to allow OpenAI API calls to succeed:
 
 ```bash
-GOOGLE_API_KEY=your_gemini_api_key
+OPENAI_API_KEY=your_openai_api_key
 ```
 
 ## Run (agent path)
@@ -109,4 +109,4 @@ python test_api.py              # basic api sanity test
 
 - **`EADDRINUSE 8000`**: port 8000 is occupied. Check via `netstat -ano | grep ":8000"` and stop the PID.
 - **`ModuleNotFoundError: No module named 'psycopg2'`**: the venv install failed or was corrupted. Delete `venv/` and re-run `.\start.ps1` to trigger a clean rebuild.
-- **`GOOGLE_API_KEY` errors**: the Gemini model calls will crash if the key is empty or invalid. Get a valid Gemini developer key and place it in `.env`.
+- **`OPENAI_API_KEY` errors**: the OpenAI model calls will crash if the key is empty or invalid. Get a valid OpenAI key and place it in `.env`.

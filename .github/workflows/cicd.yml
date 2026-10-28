@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,6 +18,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Create .env file
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE || secrets.ENV }}
+        run: |
+          if [ -n "$ENV_FILE" ]; then
+            printf '%s\n' "$ENV_FILE" > .env
+          fi
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -31,20 +40,27 @@ jobs:
 
       - name: Run tests
         env:
-          PORT: 3020
-          MEMORA_INTERNAL_TOKEN: "ci-test-internal-token"
+          GRPC_PORT: 50051
         run: pytest
 
   build-and-push:
     name: Build & Push Docker
     needs: ci
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.repo.outputs.image }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Create .env file
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE || secrets.ENV }}
+        run: |
+          if [ -n "$ENV_FILE" ]; then
+            printf '%s\n' "$ENV_FILE" > .env
+          fi
 
       - name: Set lower case image name
         id: repo
@@ -69,7 +85,7 @@ jobs:
   deploy:
     name: VPS Pull & Deploy
     needs: build-and-push
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
