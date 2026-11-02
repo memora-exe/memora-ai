@@ -70,7 +70,7 @@ class LlmAdapter(LlmPort):
         model: str = "",
         temperature: float = 0.7,
     ) -> ChatCompletionResult:
-        model_name = model or settings.openai_model or "gpt-4o-mini"
+        model_name = model or settings.openai_model or "memora"
         prompt_tokens = sum(len(m.content.split()) for m in messages)
 
         if not self.api_key:
@@ -125,7 +125,7 @@ class LlmAdapter(LlmPort):
         model: str = "",
         temperature: float = 0.7,
     ) -> Iterator[ChatStreamChunkResult]:
-        model_name = model or settings.openai_model or "gpt-4o-mini"
+        model_name = model or settings.openai_model or "memora"
         prompt_tokens = sum(len(m.content.split()) for m in messages)
 
         if not self.api_key:
