@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 @dataclass
 class Settings:
-    grpc_port: int = int(os.getenv("GRPC_PORT", "50051"))
+    grpc_port: int = int(os.getenv("GRPC_PORT") or os.getenv("PORT") or "3020")
     max_workers: int = int(os.getenv("GRPC_MAX_WORKERS", "10"))
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_base_url: str = os.getenv("OPENAI_BASE_URL", "")
