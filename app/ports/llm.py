@@ -31,7 +31,7 @@ class LlmPort(ABC):
     def chat_completion(
         self,
         messages: List[ChatMessageData],
-        model: str = "gpt-4o-mini",
+        model: str = "memora",
         temperature: float = 0.7,
     ) -> ChatCompletionResult:
         """Run non-streaming chat completion."""
@@ -41,7 +41,7 @@ class LlmPort(ABC):
     def chat_completion_stream(
         self,
         messages: List[ChatMessageData],
-        model: str = "gpt-4o-mini",
+        model: str = "memora",
         temperature: float = 0.7,
     ) -> Iterator[ChatStreamChunkResult]:
         """Stream chat completion chunks."""

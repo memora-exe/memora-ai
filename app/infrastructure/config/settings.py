@@ -18,7 +18,7 @@ class Settings:
     max_workers: int = int(os.getenv("GRPC_MAX_WORKERS", "10"))
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_base_url: str = os.getenv("OPENAI_BASE_URL", "")
-    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    openai_model: str = os.getenv("OPENAI_MODEL", "memora")
     llm_timeout_seconds: float = float(os.getenv("LLM_TIMEOUT_SECONDS", "30.0"))
     llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", "1"))
 
